@@ -157,6 +157,17 @@ reduced to `rival-uncalibrated-severity` outside the calibrated script)
     genuine and whose reading of them is wrong. See "Detecting a disagreement
     the answer does not report" below.
 
+**`unreported-field-rival`** (severity: `field-rival-screen`, default reject,
+reduced outside the calibrated script like the numeric screen)
+  - The sources give two different values for the same field and the answer
+    states one without the other, where the values are not numbers.
+  - Reaches disagreements the numeric screen cannot see at all: a different
+    name, a different place, 許可されています against 許可されていません.
+  - See "Disagreements without numbers" below.
+
+**`field-scope-unavailable`** (severity: reject)
+  - `field-rival-screen` is enabled but the request supplied no `:sources`.
+
 **`rival-scope-unavailable`** (severity: reject)
   - `rival-value-screen` is enabled but the request supplied no `:sources`.
     As with the absence screen, a configured check that cannot run rejects
@@ -388,6 +399,57 @@ not a wide sample. The rules are tuned to Japanese, where a compound like
 絶縁抵抗 distinguishes itself from 接地抵抗 in two characters; English spreads
 the same distinction over a shared word and defeats the threshold, which is
 why the screen is a note rather than a rejection there.
+
+## Disagreements without numbers
+
+The numeric screen only sees a conflict that carries digits. Two records
+naming different people, or one saying 夜間作業は許可されています where another
+says 許可されていません, leave it nothing to anchor on. This second screen works
+from whole values instead.
+
+### Field claims
+
+A claim is a field name, a separator and a short value, all within one
+sentence or line: 担当者は佐藤です, 契約電力,250kW, `the interval is 6 months`.
+The name is everything before the first separator, the value everything after,
+and a value longer than `field-value-max-chars` is treated as prose rather
+than a field value.
+
+Two claims are about the same field only when their **names match exactly**.
+That single decision replaces the guard rules the numeric screen needed:
+第1回路の測定者 and 第2回路の測定者 are simply different names, so parallel
+subjects never pair up. The price is that it misses a disagreement phrased
+differently on each side — a table cell against a footnote reading
+「注記: 契約電力は…」 splits at 「注記:」 and never matches the cell — which is
+where the numeric screen still earns its place. The two overlap on numeric
+conflicts and neither covers the other entirely.
+
+A field carrying `field-enumeration-values` distinct values or more is read as
+a list rather than a contradiction: 立会者は佐藤です, 立会者は田中です and
+立会者は鈴木です are all true together. Counting values is the only lexical way
+to separate a roster from a conflict, and it costs the case where three
+sources disagree three ways, which passes.
+
+Omission is tested against the value with and without a polite ending, because
+an answer listing both readings may write 「4月版は6か月、9月版は12か月です」 and
+drop the first one's です.
+
+### Calibration
+
+Measured the same way as the numeric screen: each corpus case fed its own
+correct answer, plus every worker answer in the recorded reports.
+
+| Corpus | Fires | Verdict |
+| --- | ---: | --- |
+| Non-numeric (5 cases) | 2 | both true: a different name, a negation |
+| Number-dense (5) | 1 | true: the record that contradicts itself |
+| Tabular (5) | 0 | misses the footnote case, which the numeric screen catches |
+| English (5) | 1 | true: the two dated procedures |
+| Recorded worker answers (131) | 5 | all true: three runs of `conflicting-sources`, `conflict-by-date`, `routed-conflict` |
+
+Zero false positives outside the one the enumeration rule was added for. That
+rule was added because the roster case fired before it existed, and it is the
+only rule here that was not forced by a failure in a recorded run.
 
 ## Fallback and bounded attempts
 

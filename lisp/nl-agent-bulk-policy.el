@@ -34,7 +34,7 @@ question, not a claim that the class has been made safe.  See
   mode min-source-bytes max-paths max-question-bytes fallback absence-markers
   numeral-screen excluded-question-kinds require-question-kind
   uncited-absence-screen coverage-overlap-chars rival-value-screen
-  rival-uncalibrated-severity)
+  rival-uncalibrated-severity field-rival-screen)
 
 (defun nl-agent-bulk-policy--validate-keys (keys allowed where)
   (unless (and (listp keys) (proper-list-p keys) (= 0 (% (length keys) 2)))
@@ -59,12 +59,13 @@ question, not a claim that the class has been made safe.  See
         (uncited-absence-screen 'reject)
         (coverage-overlap-chars 8)
         (rival-value-screen 'reject)
-        (rival-uncalibrated-severity 'note))
+        (rival-uncalibrated-severity 'note)
+        (field-rival-screen 'reject))
     (nl-agent-bulk-policy--validate-keys keys
       '(:mode :min-source-bytes :max-paths :max-question-bytes :fallback :absence-markers
         :numeral-screen :excluded-question-kinds :require-question-kind
         :uncited-absence-screen :coverage-overlap-chars :rival-value-screen
-        :rival-uncalibrated-severity)
+        :rival-uncalibrated-severity :field-rival-screen)
       "nl-agent-bulk-policy-new")
     (while keys
       (pcase (pop keys)
@@ -81,7 +82,8 @@ question, not a claim that the class has been made safe.  See
         (:coverage-overlap-chars (setq coverage-overlap-chars (pop keys)))
         (:rival-value-screen (setq rival-value-screen (pop keys)))
         (:rival-uncalibrated-severity
-         (setq rival-uncalibrated-severity (pop keys)))))
+         (setq rival-uncalibrated-severity (pop keys)))
+        (:field-rival-screen (setq field-rival-screen (pop keys)))))
     (unless (memq mode '(direct-only opt-in)) (error "mode must be direct-only or opt-in, got %S" mode))
     (unless (and (integerp min-source-bytes) (>= min-source-bytes 0) (<= min-source-bytes 131072))
       (error "min-source-bytes must be 0..131072, got %S" min-source-bytes))
@@ -117,6 +119,8 @@ question, not a claim that the class has been made safe.  See
     (unless (memq rival-uncalibrated-severity '(reject note nil))
       (error "rival-uncalibrated-severity must be reject, note or nil, got %S"
              rival-uncalibrated-severity))
+    (unless (memq field-rival-screen '(reject note nil))
+      (error "field-rival-screen must be reject, note or nil, got %S" field-rival-screen))
     (nl-agent-bulk-policy--make :mode mode :min-source-bytes min-source-bytes :max-paths max-paths
                                  :max-question-bytes max-question-bytes :fallback fallback
                                  :absence-markers absence-markers :numeral-screen numeral-screen
@@ -125,7 +129,8 @@ question, not a claim that the class has been made safe.  See
                                  :uncited-absence-screen uncited-absence-screen
                                  :coverage-overlap-chars coverage-overlap-chars
                                  :rival-value-screen rival-value-screen
-                                 :rival-uncalibrated-severity rival-uncalibrated-severity)))
+                                 :rival-uncalibrated-severity rival-uncalibrated-severity
+                                 :field-rival-screen field-rival-screen)))
 
 (defun nl-agent-bulk-policy--validate-request (request)
   (unless (and (listp request) (proper-list-p request)) (error "request must be a proper list"))
@@ -411,6 +416,123 @@ was calibrated on, the screen still reports but does not reject by default."
   (and (stringp text)
        (string-match-p "[぀-ゟ゠-ヿ一-鿿＀-￟]" text)))
 
+(defconst nl-agent-bulk-policy--field-split
+  "は\\|[,、|｜:：=＝]\\| is \\| are \\| was \\| were "
+  "Where a field name ends and its value begins.
+
+Deliberately not a bare space: splitting English on the first space would make
+「The」 the field name.  A space only separates a field from its value when it
+carries a copula, which the alternatives below cover.")
+
+(defconst nl-agent-bulk-policy-field-value-max-chars 24
+  "Longest text after a field name that still counts as its value.
+
+A field value is short — 佐藤です, 許可されていません, 250 kW.  Anything longer
+is prose that happens to follow a particle, and pairing two paragraphs because
+they start alike produces noise rather than a disagreement.")
+
+(defconst nl-agent-bulk-policy-field-name-min-chars 3
+  "Shortest field name that may anchor a claim.
+
+Two characters repeat by accident across unrelated sentences; three is the
+shortest that named a real field in the corpora.")
+
+(defun nl-agent-bulk-policy--field-claims (sources)
+  "Return ((NAME VALUE PATH) ...) for every short field claim in SOURCES.
+
+A claim is a field name, a separator and a value, all inside one sentence or
+line: 担当者は佐藤です, 契約電力,250kW, the interval is 6 months.  The name is
+everything before the first separator and the value everything after it, so
+two claims count as being about the same field only when their names match
+exactly.  That exactness is what makes the parallel-subject problem disappear:
+第1回路の絶縁抵抗 and 第2回路の絶縁抵抗 are simply different names."
+  (let ((claims nil))
+    (dolist (source sources)
+      (let ((path (plist-get source :path))
+            (text (or (plist-get source :text) "")))
+        (dolist (segment (split-string text nl-agent-bulk-policy--rival-boundary t))
+          (let ((trimmed (string-trim segment)))
+            (when (string-match nl-agent-bulk-policy--field-split trimmed)
+              (let ((name (string-trim (substring trimmed 0 (match-beginning 0))))
+                    (value (string-trim (substring trimmed (match-end 0)))))
+                (when (and (>= (length name) nl-agent-bulk-policy-field-name-min-chars)
+                           (> (length value) 0)
+                           (<= (length value) nl-agent-bulk-policy-field-value-max-chars))
+                  (push (list name value path) claims))))))))
+    (nreverse claims)))
+
+(defconst nl-agent-bulk-policy-field-enumeration-values 3
+  "How many distinct values make a repeated field name a list, not a conflict.
+
+Two sources disagreeing state two values.  A roster states many: 立会者は佐藤です,
+立会者は田中です, 立会者は鈴木です are all true together.  No lexical rule can
+tell a contradiction from a list by reading one pair, but counting the values
+separates the common cases.  The cost is that three sources disagreeing three
+ways are read as a list and pass; that is rarer than a roster and is recorded
+in `docs/bulk-policy.md'.")
+
+(defun nl-agent-bulk-policy--enumerated-field-p (name claims)
+  "Return non-nil when NAME carries enough distinct values in CLAIMS to be a list."
+  (let ((values nil))
+    (dolist (claim claims)
+      (when (and (equal (nth 0 claim) name)
+                 (not (member (nth 1 claim) values)))
+        (push (nth 1 claim) values)))
+    (>= (length values) nl-agent-bulk-policy-field-enumeration-values)))
+
+(defconst nl-agent-bulk-policy--value-ending
+  (regexp-opt '("です" "ます" "でした" "ました" "である" "だ") t)
+  "Polite endings a value may carry in a source but not in an answer.
+
+A source writes 点検間隔は6か月です; an answer listing both readings writes
+「4月版は6か月、9月版は12か月です」, where the first value loses its ending.
+Testing omission against the value with and without its ending stops that
+answer from being read as having omitted a value it plainly states.")
+
+(defun nl-agent-bulk-policy--value-core (value)
+  "Return VALUE without a trailing polite ending."
+  (if (string-match (concat nl-agent-bulk-policy--value-ending "\\'") value)
+      (substring value 0 (match-beginning 0))
+    value))
+
+(defun nl-agent-bulk-policy--value-stated-p (value text)
+  "Return non-nil when TEXT states VALUE, with or without its polite ending."
+  (let ((normalised (nl-agent-bulk-policy--collapse-whitespace value))
+        (core (nl-agent-bulk-policy--collapse-whitespace
+               (nl-agent-bulk-policy--value-core value))))
+    (or (string-search normalised text)
+        (and (> (length core) 0) (string-search core text)))))
+
+(defun nl-agent-bulk-policy--unreported-field-rivals (answer sources)
+  "Return field claims SOURCES contradict and ANSWER states only one side of.
+
+Where `nl-agent-bulk-policy--unreported-rivals' compares numbers, this compares
+whole values, so it sees a disagreement that carries no digits at all: a
+different name, a different place, 許可されています against 許可されていません.
+It is stricter in exchange — the field names must be identical, not merely
+similar — because without a number to anchor on there is nothing else holding
+the comparison to one subject.
+
+A claim is reported when the answer contains one value and not the other, the
+same by-value test the numeric screen uses: an answer carrying both is
+engaging with the disagreement.  Each element is (NAME STATED OMITTED PATH)."
+  (let ((claims (nl-agent-bulk-policy--field-claims sources))
+        (found nil))
+    (when (and (stringp answer) claims)
+      (let ((normalised (nl-agent-bulk-policy--collapse-whitespace answer)))
+        (dolist (claim claims)
+          (dolist (other claims)
+            (when (and (equal (nth 0 claim) (nth 0 other))
+                       (not (equal (nth 1 claim) (nth 1 other)))
+                       (not (nl-agent-bulk-policy--enumerated-field-p
+                             (nth 0 claim) claims))
+                       (not (assoc (nth 0 claim) found))
+                       (nl-agent-bulk-policy--value-stated-p (nth 1 claim) normalised)
+                       (not (nl-agent-bulk-policy--value-stated-p (nth 1 other) normalised)))
+              (push (list (nth 0 claim) (nth 1 claim) (nth 1 other) (nth 2 other))
+                    found))))))
+    (nreverse found)))
+
 (defun nl-agent-bulk-policy--unreported-rivals (answer sources)
   "Return rivals of ANSWER's numbers that SOURCES state and ANSWER omits.
 
@@ -631,6 +753,30 @@ value anyway is exempt too, which is a known limitation recorded in
                                 :detail (format "Answer states %s but %s states %s after %S%s"
                                                 (nth 0 rival) (nth 2 rival) (nth 1 rival)
                                                 (nth 3 rival)
+                                                (if calibrated ""
+                                                  " (severity reduced: outside the script the screen was calibrated on)")))
+                          diagnostics)
+                    (when (eq severity 'reject) (setq disposition 'reject))))))))
+        ;; The same question for values that carry no digits at all.
+        (let ((screen (nl-agent-bulk-policy-field-rival-screen policy)))
+          (when (and screen (not not-found) (stringp answer))
+            (if (null sources)
+                (progn
+                  (push (list :code 'field-scope-unavailable :severity 'reject
+                              :detail "field-rival-screen is enabled but the request supplied no :sources")
+                        diagnostics)
+                  (setq disposition 'reject))
+              (dolist (rival (nl-agent-bulk-policy--unreported-field-rivals answer sources))
+                (let* ((calibrated (nl-agent-bulk-policy--calibrated-script-p
+                                    (concat (nth 0 rival) (nth 2 rival))))
+                       (severity (if (or calibrated (not (eq screen 'reject)))
+                                     screen
+                                   (nl-agent-bulk-policy-rival-uncalibrated-severity policy))))
+                  (when severity
+                    (push (list :code 'unreported-field-rival :severity severity
+                                :detail (format "Answer gives %S as %s but %s gives %S%s"
+                                                (nth 1 rival) (nth 0 rival) (nth 3 rival)
+                                                (nth 2 rival)
                                                 (if calibrated ""
                                                   " (severity reduced: outside the script the screen was calibrated on)")))
                           diagnostics)

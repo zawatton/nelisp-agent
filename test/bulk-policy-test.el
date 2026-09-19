@@ -746,10 +746,11 @@ This removes the false positive both live runs produced on absent-field."
   "Turning the screen off is a configuration choice, and then nothing fires."
   (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0
                                            :uncited-absence-screen nil
-                                           ;; The rival screen also needs
+                                           ;; The rival screens also need
                                            ;; sources; off here so this test
                                            ;; isolates the absence screen.
-                                           :rival-value-screen nil))
+                                           :rival-value-screen nil
+                                           :field-rival-screen nil))
          (diag (nl-agent-bulk-policy-diagnose
                 policy
                 (nl-agent-bulk-policy-test--absence-request)
@@ -1107,6 +1108,115 @@ keeps the information without paying a fallback for it."
                "6か月です" :rival-uncalibrated-severity nil)))
     (should (eq 'reject (plist-get diag :disposition))))
   (should-error (nl-agent-bulk-policy-new :rival-uncalibrated-severity 'maybe)))
+
+;; Tests 60-68: disagreements that carry no numbers.
+
+(defun nl-agent-bulk-policy-test--field-diagnose (sources answer &rest keys)
+  "Diagnose ANSWER against SOURCES for the field screen, under KEYS."
+  (apply #'nl-agent-bulk-policy-test--rival-diagnose sources answer keys))
+
+(defun nl-agent-bulk-policy-test--field-code (diag)
+  "Return DIAG's `unreported-field-rival' diagnostic, if any."
+  (cl-find 'unreported-field-rival (plist-get diag :diagnostics)
+           :key (lambda (d) (plist-get d :code))))
+
+(defconst nl-agent-bulk-policy-test--person-sources
+  '((:path "a.txt" :text "保守連絡票 (4月版)\n設備の保安担当者は佐藤です。\n")
+    (:path "b.txt" :text "保守連絡票 (9月版)\n設備の保安担当者は田中です。\n"))
+  "Two records naming different responsible people.")
+
+(ert-deftest nl-agent-bulk-policy-test-field-rival-different-name ()
+  "A different name for the same field is a disagreement with no digits in it."
+  (let* ((diag (nl-agent-bulk-policy-test--field-diagnose
+                nl-agent-bulk-policy-test--person-sources
+                "設備の保安担当者は佐藤です"))
+         (rival (nl-agent-bulk-policy-test--field-code diag)))
+    (should rival)
+    (should (eq 'reject (plist-get rival :severity)))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should (string-match-p "田中" (plist-get rival :detail)))))
+
+(ert-deftest nl-agent-bulk-policy-test-field-rival-sees-a-negation ()
+  "Permitted against not permitted, which no numeric screen can see.
+The assertion that the numeric screen stays silent is the point: this shape has
+no digits at all, so only the field screen can reach it."
+  (let* ((sources '((:path "a.txt" :text "作業規則 (本則)\n夜間作業は許可されています。\n")
+                    (:path "b.txt" :text "作業規則 (別表)\n夜間作業は許可されていません。\n")))
+         (diag (nl-agent-bulk-policy-test--field-diagnose
+                sources "夜間作業は許可されています")))
+    (should (nl-agent-bulk-policy-test--field-code diag))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should-not (cl-some (lambda (d) (eq (plist-get d :code) 'unreported-rival-value))
+                         (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-field-rival-consistent-sources-pass ()
+  "Two records agreeing on a field are not a disagreement."
+  (let ((diag (nl-agent-bulk-policy-test--field-diagnose
+               '((:path "a.txt" :text "機器台帳 (正本)\n設置場所はA棟です。\n")
+                 (:path "b.txt" :text "機器台帳 (副本)\n設置場所はA棟です。\n"))
+               "設置場所はA棟です")))
+    (should-not (nl-agent-bulk-policy-test--field-code diag))))
+
+(ert-deftest nl-agent-bulk-policy-test-field-rival-parallel-subjects-pass ()
+  "Different field names are different fields, however similar they read.
+第1回路の測定者 and 第2回路の測定者 name two subjects, and requiring the names to
+match exactly is what keeps them apart without any extra rule."
+  (let ((diag (nl-agent-bulk-policy-test--field-diagnose
+               '((:path "a.txt" :text "測定記録\n第1回路の測定者は佐藤です。\n第2回路の測定者は田中です。\n"))
+               "第2回路の測定者は田中です")))
+    (should-not (nl-agent-bulk-policy-test--field-code diag))))
+
+(ert-deftest nl-agent-bulk-policy-test-field-rival-roster-is-a-list-not-a-conflict ()
+  "A field carrying three values is a list, and naming one of them is fine.
+立会者は佐藤です, 立会者は田中です and 立会者は鈴木です are all true together, which
+counting the distinct values separates from a contradiction."
+  (let ((diag (nl-agent-bulk-policy-test--field-diagnose
+               '((:path "a.txt" :text "立会者名簿\n立会者は佐藤です。\n立会者は田中です。\n立会者は鈴木です。\n"))
+               "立会者は佐藤です")))
+    (should-not (nl-agent-bulk-policy-test--field-code diag))))
+
+(ert-deftest nl-agent-bulk-policy-test-field-rival-naming-both-is-accepted ()
+  "An answer that states both readings is engaging with the disagreement.
+It may drop a value's polite ending while listing it, which must not read as
+having omitted it."
+  (let ((diag (nl-agent-bulk-policy-test--field-diagnose
+               nl-agent-bulk-policy-test--person-sources
+               "4月版は佐藤、9月版は田中です")))
+    (should-not (nl-agent-bulk-policy-test--field-code diag))))
+
+(ert-deftest nl-agent-bulk-policy-test-field-rival-english-is-a-note ()
+  "Outside the calibrated script this screen reports without rejecting too."
+  (let* ((diag (nl-agent-bulk-policy-test--field-diagnose
+                '((:path "a.txt" :text "Contact sheet, April\nThe safety officer is Sato.\n")
+                  (:path "b.txt" :text "Contact sheet, September\nThe safety officer is Tanaka.\n"))
+                "The safety officer is Sato"))
+         (rival (nl-agent-bulk-policy-test--field-code diag)))
+    (should rival)
+    (should (eq 'note (plist-get rival :severity)))
+    (should (eq 'accept-for-review (plist-get diag :disposition)))))
+
+(ert-deftest nl-agent-bulk-policy-test-field-rival-screen-is-configurable ()
+  "The screen can be downgraded, silenced, and refuses to skip silently."
+  (let ((diag (nl-agent-bulk-policy-test--field-diagnose
+               nl-agent-bulk-policy-test--person-sources
+               "設備の保安担当者は佐藤です" :field-rival-screen 'note)))
+    (should (eq 'accept-for-review (plist-get diag :disposition)))
+    (should (eq 'note (plist-get (nl-agent-bulk-policy-test--field-code diag) :severity))))
+  (let ((diag (nl-agent-bulk-policy-test--field-diagnose
+               nl-agent-bulk-policy-test--person-sources
+               "設備の保安担当者は佐藤です" :field-rival-screen nil)))
+    (should-not (nl-agent-bulk-policy-test--field-code diag)))
+  (let ((diag (nl-agent-bulk-policy-diagnose
+               (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0 :max-paths 2
+                                         :rival-value-screen nil
+                                         :uncited-absence-screen nil)
+               '(:question "q" :paths ("a.txt") :source-bytes 10000 :question-kind fact)
+               '(:status needs-review :answer "佐藤です" :not-found nil :metrics nil
+                 :references nil))))
+    (should (cl-some (lambda (d) (eq (plist-get d :code) 'field-scope-unavailable))
+                     (plist-get diag :diagnostics)))
+    (should (eq 'reject (plist-get diag :disposition))))
+  (should-error (nl-agent-bulk-policy-new :field-rival-screen 'maybe)))
 
 (when noninteractive
   (ert-run-tests-batch-and-exit))
