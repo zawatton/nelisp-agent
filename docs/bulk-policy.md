@@ -235,13 +235,14 @@ the recorded live reports, and `examples/bulk-dense-corpus.sexp`, five
 number-dense inspection records fed their own correct answers so that any fire
 is a false positive.
 
-| Version | Recorded: fires / true / false | Dense: false positives |
-| --- | --- | ---: |
-| Shared wording only | 8 / 1 / 7 | — |
-| Plus the sentence-boundary cut | 1 / 1 / 0 | — |
-| Plus cross-source comparison | 4 / 4 / 0 | 3 of 4 |
-| Plus the identifier and parallel-subject rules | 4 / 4 / 0 | 1 of 4 |
-| Plus a six-character threshold | **4 / 4 / 0** | **0 of 4** |
+| Version | Recorded: fires / true / false | Dense | Tables |
+| --- | --- | ---: | --- |
+| Shared wording only | 8 / 1 / 7 | — | — |
+| Plus the sentence-boundary cut | 1 / 1 / 0 | — | — |
+| Plus cross-source comparison | 4 / 4 / 0 | 3 false | — |
+| Plus identifier and parallel-subject rules | 4 / 4 / 0 | 1 false | — |
+| Plus a longer threshold | 4 / 4 / 0 | 0 false | **contradiction missed** |
+| Plus separator stripping | **4 / 4 / 0** | **0 false** | **0 false, caught** |
 
 Each step was forced by a failure the previous step produced.
 
@@ -265,8 +266,22 @@ readings. A genuine contradiction restates the same subject, which is why
 both rules keep every true positive.
 
 The last false positive was 絶縁抵抗は 85MΩ paired with 接地抵抗は 8.5Ω on the
-four characters 「抵抗は 」. Six characters separates them, and the shortest
-shared context among the real contradictions is 「契約電力は 」, also six.
+four characters 「抵抗は 」.
+
+Tables then broke it the other way. `examples/bulk-table-corpus.sexp` lays the
+same material out as a pipe table, a CSV, a tab-separated series, a totals
+table and a table whose footnote contradicts a cell. It produced no false
+positives — a newline is already a boundary and rows differ by their
+subject — but it **missed the contradiction**, the one thing it had to catch.
+A cell writes 契約電力,250kW and the footnote writes 契約電力は 180kW: the field
+name is identical and only the separator differs, so a comparison that starts
+at the separator finds nothing in common.
+
+Both contexts are therefore stripped of their trailing separators — spaces,
+`,`、`、`、`|`、`:`、`=` and the topic particle 「は」 — before being compared, and
+the threshold counts characters of what is left. On the stripped form
+絶縁抵抗 against 接地抵抗 share only 「抵抗」, so four characters is now
+enough, and the shortest genuine contradiction, 「契約電力」, is exactly four.
 
 ### What it does not do
 
@@ -286,9 +301,9 @@ suggests. That is why `examples/bulk-dense-corpus.sexp` exists: repeated
 measurements, equipment labels, a schedule and an invoice, each fed its own
 correct answer. It broke three of the four rules' worth of the screen when it
 was first run, which is the point of it, and a test keeps it as a regression
-guard. Nine cases of incidental numbers is still not a wide sample, and the
-rules are tuned to Japanese phrasing where a measurement follows a particle;
-another language or a table-shaped source has not been tried.
+guard. Fourteen cases of incidental numbers, half of them tabular, is still not a
+wide sample, and the rules are tuned to Japanese phrasing where a measurement
+follows a particle or a delimiter. Another language has not been tried.
 
 ## Fallback and bounded attempts
 

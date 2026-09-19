@@ -256,7 +256,17 @@ available, there is no evidence and the answer counts as not using it."
 (defconst nl-agent-bulk-policy-rival-context-chars 16
   "How much text before a number is taken as its context, in characters.")
 
-(defconst nl-agent-bulk-policy-rival-match-chars 6
+(defconst nl-agent-bulk-policy--rival-separator "[ \t,、|｜:：=＝は]"
+  "Characters that separate a field name from its value.
+
+A table writes 契約電力,250kW and prose writes 契約電力は 180kW.  The wording
+that names the field is the same; only the separator differs, and comparing
+raw suffixes would find nothing in common because the comparison starts at
+that separator.  Both contexts are stripped of a trailing run of these before
+being compared, which is what lets a table cell be matched against a footnote
+that contradicts it.")
+
+(defconst nl-agent-bulk-policy-rival-match-chars 4
   "How many characters two contexts must share, ending at the number.
 
 Two numbers whose immediately preceding text agrees for this many characters
@@ -264,11 +274,12 @@ are treated as candidates for the same slot: 点検間隔は6か月 and 点検�
 share 「点検間隔は」.  Shorter matches make unrelated numbers look like rivals;
 longer ones miss a rival phrased slightly differently.
 
-Six was chosen by measurement, not by argument.  At four, 絶縁抵抗は 85MΩ and
-接地抵抗は 8.5Ω pair up on the shared 「抵抗は 」 although they are different
-measurements; six separates them and still keeps every contradiction in the
-recorded corpora, whose shortest shared context is 「契約電力は 」.  A domain
-whose phrasing is shorter or longer may need a different value.")
+Four was chosen by measurement, not by argument, and it counts characters of
+the context after its trailing separators are stripped.  On the raw context
+four was too loose -- 絶縁抵抗は 85MΩ and 接地抵抗は 8.5Ω pair up on 「抵抗は 」
+-- but stripping removes 「は 」 from both, leaving 「抵抗」, so the same pair now
+needs only two.  Meanwhile the shortest genuine contradiction is 「契約電力」,
+exactly four.  A domain whose field names are shorter may need another value.")
 
 (defconst nl-agent-bulk-policy--rival-boundary "[。．\\.!?！？\n\r]"
   "Characters that end the phrase introducing a number.
@@ -334,9 +345,20 @@ the contradictions, because a real contradiction restates the same subject."
        (not (equal left right))
        (= 1 (cl-count nil (cl-mapcar #'eq (append left nil) (append right nil))))))
 
-(defun nl-agent-bulk-policy--rival-contexts-p (mine other)
-  "Return non-nil when MINE and OTHER introduce competing readings of one slot."
-  (let ((shared (nl-agent-bulk-policy--shared-tail mine other)))
+(defun nl-agent-bulk-policy--strip-separators (text)
+  "Return TEXT without its trailing run of field separators."
+  (let ((end (length text)))
+    (while (and (> end 0)
+                (string-match-p nl-agent-bulk-policy--rival-separator
+                                (substring text (1- end) end)))
+      (setq end (1- end)))
+    (substring text 0 end)))
+
+(defun nl-agent-bulk-policy--rival-contexts-p (raw-mine raw-other)
+  "Return non-nil when the contexts introduce competing readings of one slot."
+  (let* ((mine (nl-agent-bulk-policy--strip-separators raw-mine))
+         (other (nl-agent-bulk-policy--strip-separators raw-other))
+         (shared (nl-agent-bulk-policy--shared-tail mine other)))
     (and (>= shared nl-agent-bulk-policy-rival-match-chars)
          (not (nl-agent-bulk-policy--parallel-subjects-p
                (substring mine 0 (- (length mine) shared))

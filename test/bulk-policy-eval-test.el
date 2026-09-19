@@ -327,6 +327,22 @@ This covers the wiring: the kind-aware screen must be the one the runner uses."
                             (buffer-string))))
             paths)))
 
+(defun nl-agent-bulk-policy-eval-test--screen-corpus (relative-path)
+  "Run the rival screen over RELATIVE-PATH's cases using their own answers.
+Returns the ids that fired.  Feeding each case its own correct answer makes
+every fire a false positive except on a case that really does contradict
+itself."
+  (let ((corpus (nl-agent-example-bulk-eval-load-corpus
+                 (expand-file-name relative-path nl-agent-example-bulk-policy-root)))
+        (fired nil))
+    (dolist (case (plist-get corpus :cases))
+      (let* ((sources (nl-agent-bulk-policy-eval-test--dense-sources
+                       (plist-get case :paths)))
+             (answer (mapconcat #'identity (plist-get case :required) "。")))
+        (when (nl-agent-bulk-policy--unreported-rivals answer sources)
+          (push (plist-get case :id) fired))))
+    (nreverse fired)))
+
 (ert-deftest bulk-policy-eval-test-rival-screen-on-number-dense-corpus ()
   "The rival screen must not fire on correct answers in number-dense sources.
 `examples/bulk-dense-corpus.sexp' is an inspection-record corpus: repeated
@@ -336,18 +352,25 @@ correct answer is fed to the screen, so a fire is a false positive.  Only
 
 Without the identifier-label and parallel-subject rules this fired on three of
 the four correct answers, and at a four-character threshold on a fourth."
-  (let* ((corpus (nl-agent-example-bulk-eval-load-corpus
-                  (expand-file-name "examples/bulk-dense-corpus.sexp"
-                                    nl-agent-example-bulk-policy-root)))
-         (fired nil))
-    (should (= 5 (length (plist-get corpus :cases))))
-    (dolist (case (plist-get corpus :cases))
-      (let* ((sources (nl-agent-bulk-policy-eval-test--dense-sources
-                       (plist-get case :paths)))
-             (answer (mapconcat #'identity (plist-get case :required) "。"))
-             (rivals (nl-agent-bulk-policy--unreported-rivals answer sources)))
-        (when rivals (push (plist-get case :id) fired))))
-    (should (equal '("dense-buried-conflict") fired))))
+  (should (equal '("dense-buried-conflict")
+                 (nl-agent-bulk-policy-eval-test--screen-corpus
+                  "examples/bulk-dense-corpus.sexp"))))
+
+(ert-deftest bulk-policy-eval-test-rival-screen-on-table-shaped-corpus ()
+  "Tables must neither fool the screen nor hide a contradiction from it.
+`examples/bulk-table-corpus.sexp' is the same material laid out as tables: a
+pipe table, a CSV, a tab-separated series, a totals table and a table whose
+footnote contradicts a cell.  A table has no sentence boundaries and its rows
+share a column heading, so it stresses the opposite failure from the dense
+corpus.
+
+Only `table-footnote-conflict' may fire.  Before separators were stripped from
+the context it was the one case that did *not* fire, because a cell writes
+契約電力,250kW while the footnote writes 契約電力は 180kW and the comparison
+began at the differing separator."
+  (should (equal '("table-footnote-conflict")
+                 (nl-agent-bulk-policy-eval-test--screen-corpus
+                  "examples/bulk-table-corpus.sexp"))))
 
 (ert-deftest bulk-policy-eval-test-worker-timeout-override ()
   "The worker timeout defaults to the shipped value and validates overrides.
