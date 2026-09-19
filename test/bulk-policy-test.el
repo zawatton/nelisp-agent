@@ -1039,5 +1039,74 @@ runs and one true positive."
                      (plist-get diag :diagnostics))))
   (should-error (nl-agent-bulk-policy-new :rival-value-screen 'maybe)))
 
+;; Tests 56-59: the screen rejects only on the script it was calibrated on.
+
+(defconst nl-agent-bulk-policy-test--english-rival-sources
+  '((:path "a.txt" :text "Work procedure, issued 1 April 2026\nThe inspection interval for the panel is 6 months.\n")
+    (:path "b.txt" :text "Work procedure, issued 1 September 2026\nThe inspection interval for the panel is 12 months.\n"))
+  "The English pair from `examples/bulk-en-corpus.sexp'.")
+
+(defun nl-agent-bulk-policy-test--rival-diagnose (sources answer &rest keys)
+  "Diagnose ANSWER against SOURCES under a policy built from KEYS."
+  (let ((policy (apply #'nl-agent-bulk-policy-new
+                       (append '(:mode opt-in :min-source-bytes 0 :max-paths 2) keys))))
+    (nl-agent-bulk-policy-diagnose
+     policy
+     (list :question "q" :paths (mapcar (lambda (s) (plist-get s :path)) sources)
+           :source-bytes 10000 :question-kind 'fact :sources sources)
+     (list :status 'needs-review :answer answer :not-found nil :metrics nil
+           :references (mapcar (lambda (s)
+                                 (list :path (plist-get s :path) :start-line 1 :end-line 1
+                                       :sha256 (make-string 64 ?a)
+                                       :text (plist-get s :text)))
+                               sources)))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-english-is-a-note-by-default ()
+  "Outside the calibrated script the screen reports without rejecting.
+The thresholds were measured on Japanese; English spreads the same distinction
+across a shared word, which produced a measured false positive.  Reporting
+keeps the information without paying a fallback for it."
+  (let* ((diag (nl-agent-bulk-policy-test--rival-diagnose
+                nl-agent-bulk-policy-test--english-rival-sources
+                "The interval is 6 months"))
+         (rival (cl-find 'unreported-rival-value (plist-get diag :diagnostics)
+                         :key (lambda (d) (plist-get d :code)))))
+    (should rival)
+    (should (eq 'note (plist-get rival :severity)))
+    (should (eq 'accept-for-review (plist-get diag :disposition)))
+    (should (string-match-p "severity reduced" (plist-get rival :detail)))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-japanese-still-rejects ()
+  "The control: the same disagreement in Japanese is still a rejection."
+  (let* ((diag (nl-agent-bulk-policy-test--rival-diagnose
+                '((:path "a.txt" :text "高圧受電盤の点検間隔は6か月です。\n")
+                  (:path "b.txt" :text "高圧受電盤の点検間隔は12か月です。\n"))
+                "6か月です"))
+         (rival (cl-find 'unreported-rival-value (plist-get diag :diagnostics)
+                         :key (lambda (d) (plist-get d :code)))))
+    (should (eq 'reject (plist-get rival :severity)))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should-not (string-match-p "severity reduced" (plist-get rival :detail)))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-uncalibrated-severity-is-configurable ()
+  "A host may reject outside the calibrated script, or say nothing there."
+  (let ((diag (nl-agent-bulk-policy-test--rival-diagnose
+               nl-agent-bulk-policy-test--english-rival-sources
+               "The interval is 6 months" :rival-uncalibrated-severity 'reject)))
+    (should (eq 'reject (plist-get diag :disposition))))
+  (let ((diag (nl-agent-bulk-policy-test--rival-diagnose
+               nl-agent-bulk-policy-test--english-rival-sources
+               "The interval is 6 months" :rival-uncalibrated-severity nil)))
+    (should (eq 'accept-for-review (plist-get diag :disposition)))
+    (should-not (cl-some (lambda (d) (eq (plist-get d :code) 'unreported-rival-value))
+                         (plist-get diag :diagnostics))))
+  ;; Silencing it outside the calibrated script must not silence it inside.
+  (let ((diag (nl-agent-bulk-policy-test--rival-diagnose
+               '((:path "a.txt" :text "高圧受電盤の点検間隔は6か月です。\n")
+                 (:path "b.txt" :text "高圧受電盤の点検間隔は12か月です。\n"))
+               "6か月です" :rival-uncalibrated-severity nil)))
+    (should (eq 'reject (plist-get diag :disposition))))
+  (should-error (nl-agent-bulk-policy-new :rival-uncalibrated-severity 'maybe)))
+
 (when noninteractive
   (ert-run-tests-batch-and-exit))

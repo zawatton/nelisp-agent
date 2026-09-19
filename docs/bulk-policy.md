@@ -147,9 +147,12 @@ answer is not usable without fallback or human correction.
     answer presented as final. The default is `reject` for that reason, and
     `note` or nil are available for hosts that judge the trade differently.
 
-**`unreported-rival-value`** (severity: `rival-value-screen`, default reject)
+**`unreported-rival-value`** (severity: `rival-value-screen`, default reject,
+reduced to `rival-uncalibrated-severity` outside the calibrated script)
   - The answer states a number that the sources contradict, and does not
     mention the competing value.
+  - Rejects on Japanese, where the thresholds were measured, and reports
+    without rejecting elsewhere; the detail says so when it has been reduced.
   - This is the only screen aimed at an answer whose citations are all
     genuine and whose reading of them is wrong. See "Detecting a disagreement
     the answer does not report" below.
@@ -308,8 +311,18 @@ Japanese and eleven in English, so no threshold separates the English pair.
 
 A rule keying on a capitalised word before the number removed that false
 positive and removed both English true positives with it, so it was not kept.
-**A host working in English should set `rival-value-screen` to `note`**, where
-the screen reports without rejecting.
+
+**That downgrade is now the default rather than advice.** When neither context
+of a rival pair contains a Japanese character, the severity falls to
+`rival-uncalibrated-severity`, `note` by default: the screen still reports the
+disagreement, and does not reject on material its thresholds were never
+measured against. The diagnostic's detail says the severity was reduced and
+why, so the decision is visible in the report rather than silent.
+
+Japanese is unaffected — the same disagreement still rejects — and a host can
+set `rival-uncalibrated-severity` to `reject` to opt back in everywhere, or to
+nil to say nothing outside the calibrated script. Silencing it there does not
+silence it on Japanese, which a test pins.
 
 ### What it does not do
 

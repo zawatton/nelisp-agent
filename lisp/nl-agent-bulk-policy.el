@@ -33,7 +33,8 @@ question, not a claim that the class has been made safe.  See
 (cl-defstruct (nl-agent-bulk-policy (:constructor nl-agent-bulk-policy--make))
   mode min-source-bytes max-paths max-question-bytes fallback absence-markers
   numeral-screen excluded-question-kinds require-question-kind
-  uncited-absence-screen coverage-overlap-chars rival-value-screen)
+  uncited-absence-screen coverage-overlap-chars rival-value-screen
+  rival-uncalibrated-severity)
 
 (defun nl-agent-bulk-policy--validate-keys (keys allowed where)
   (unless (and (listp keys) (proper-list-p keys) (= 0 (% (length keys) 2)))
@@ -57,11 +58,13 @@ question, not a claim that the class has been made safe.  See
         (require-question-kind t)
         (uncited-absence-screen 'reject)
         (coverage-overlap-chars 8)
-        (rival-value-screen 'reject))
+        (rival-value-screen 'reject)
+        (rival-uncalibrated-severity 'note))
     (nl-agent-bulk-policy--validate-keys keys
       '(:mode :min-source-bytes :max-paths :max-question-bytes :fallback :absence-markers
         :numeral-screen :excluded-question-kinds :require-question-kind
-        :uncited-absence-screen :coverage-overlap-chars :rival-value-screen)
+        :uncited-absence-screen :coverage-overlap-chars :rival-value-screen
+        :rival-uncalibrated-severity)
       "nl-agent-bulk-policy-new")
     (while keys
       (pcase (pop keys)
@@ -76,7 +79,9 @@ question, not a claim that the class has been made safe.  See
         (:require-question-kind (setq require-question-kind (pop keys)))
         (:uncited-absence-screen (setq uncited-absence-screen (pop keys)))
         (:coverage-overlap-chars (setq coverage-overlap-chars (pop keys)))
-        (:rival-value-screen (setq rival-value-screen (pop keys)))))
+        (:rival-value-screen (setq rival-value-screen (pop keys)))
+        (:rival-uncalibrated-severity
+         (setq rival-uncalibrated-severity (pop keys)))))
     (unless (memq mode '(direct-only opt-in)) (error "mode must be direct-only or opt-in, got %S" mode))
     (unless (and (integerp min-source-bytes) (>= min-source-bytes 0) (<= min-source-bytes 131072))
       (error "min-source-bytes must be 0..131072, got %S" min-source-bytes))
@@ -109,6 +114,9 @@ question, not a claim that the class has been made safe.  See
              coverage-overlap-chars))
     (unless (memq rival-value-screen '(reject note nil))
       (error "rival-value-screen must be reject, note or nil, got %S" rival-value-screen))
+    (unless (memq rival-uncalibrated-severity '(reject note nil))
+      (error "rival-uncalibrated-severity must be reject, note or nil, got %S"
+             rival-uncalibrated-severity))
     (nl-agent-bulk-policy--make :mode mode :min-source-bytes min-source-bytes :max-paths max-paths
                                  :max-question-bytes max-question-bytes :fallback fallback
                                  :absence-markers absence-markers :numeral-screen numeral-screen
@@ -116,7 +124,8 @@ question, not a claim that the class has been made safe.  See
                                  :require-question-kind require-question-kind
                                  :uncited-absence-screen uncited-absence-screen
                                  :coverage-overlap-chars coverage-overlap-chars
-                                 :rival-value-screen rival-value-screen)))
+                                 :rival-value-screen rival-value-screen
+                                 :rival-uncalibrated-severity rival-uncalibrated-severity)))
 
 (defun nl-agent-bulk-policy--validate-request (request)
   (unless (and (listp request) (proper-list-p request)) (error "request must be a proper list"))
@@ -391,6 +400,17 @@ the contradictions, because a real contradiction restates the same subject."
                (substring mine 0 (- (length mine) shared))
                (substring other 0 (- (length other) shared)))))))
 
+(defun nl-agent-bulk-policy--calibrated-script-p (text)
+  "Return non-nil when TEXT contains a character the screen was calibrated on.
+
+The rival screen's thresholds were measured on Japanese, where a compound such
+as 絶縁抵抗 separates itself from 接地抵抗 in two characters.  A language that
+spreads the same distinction across a shared word defeats a character count,
+which was measured: see `examples/bulk-en-corpus.sexp'.  Outside the script it
+was calibrated on, the screen still reports but does not reject by default."
+  (and (stringp text)
+       (string-match-p "[぀-ゟ゠-ヿ一-鿿＀-￟]" text)))
+
 (defun nl-agent-bulk-policy--unreported-rivals (answer sources)
   "Return rivals of ANSWER's numbers that SOURCES state and ANSWER omits.
 
@@ -403,7 +423,8 @@ hiding it, which is checked by value rather than by looking for words like
 \"conflict\" because an answer may contain such a word while denying the
 disagreement.
 
-Each element is (VALUE RIVAL PATH CONTEXT)."
+Each element is (VALUE RIVAL PATH CONTEXT BOTH-CONTEXTS), the last being the
+two contexts joined so the caller can judge what script they are written in."
   (let* ((answer-values (mapcar #'car (nl-agent-bulk-policy--numeral-contexts answer)))
          (entries nil)
          (found nil))
@@ -425,7 +446,8 @@ Each element is (VALUE RIVAL PATH CONTEXT)."
                 (push (list (car mine) (car other) (nth 2 other)
                             (substring (nth 1 other)
                                        (max 0 (- (length (nth 1 other))
-                                                 nl-agent-bulk-policy-rival-match-chars))))
+                                                 nl-agent-bulk-policy-rival-match-chars)))
+                            (concat (nth 1 mine) (nth 1 other)))
                       found)))))))
     (nreverse found)))
 
@@ -600,11 +622,19 @@ value anyway is exempt too, which is a known limitation recorded in
                         diagnostics)
                   (setq disposition 'reject))
               (dolist (rival (nl-agent-bulk-policy--unreported-rivals answer sources))
-                (push (list :code 'unreported-rival-value :severity screen
-                            :detail (format "Answer states %s but %s states %s after %S"
-                                            (nth 0 rival) (nth 2 rival) (nth 1 rival) (nth 3 rival)))
-                      diagnostics)
-                (when (eq screen 'reject) (setq disposition 'reject))))))
+                (let* ((calibrated (nl-agent-bulk-policy--calibrated-script-p (nth 4 rival)))
+                       (severity (if (or calibrated (not (eq screen 'reject)))
+                                     screen
+                                   (nl-agent-bulk-policy-rival-uncalibrated-severity policy))))
+                  (when severity
+                    (push (list :code 'unreported-rival-value :severity severity
+                                :detail (format "Answer states %s but %s states %s after %S%s"
+                                                (nth 0 rival) (nth 2 rival) (nth 1 rival)
+                                                (nth 3 rival)
+                                                (if calibrated ""
+                                                  " (severity reduced: outside the script the screen was calibrated on)")))
+                          diagnostics)
+                    (when (eq severity 'reject) (setq disposition 'reject))))))))
         (let ((unsupported (nl-agent-bulk-policy--unsupported-numerals answer references
                                                                         (nl-agent-bulk-policy-absence-markers policy))))
           (when unsupported
