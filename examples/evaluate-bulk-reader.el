@@ -95,7 +95,7 @@
   "Return non-nil when VALUE is a finite proper list."
   (and (listp value)
        (condition-case nil
-           (progn (length value) t)
+           (progn (ignore (length value)) t)
          (error nil))))
 
 (defun nl-agent-example-bulk-eval--plist-exact-p (value keys)
@@ -320,7 +320,7 @@
     (nl-agent-bulk-reader--tool-value result)))
 
 (defun nl-agent-example-bulk-eval--sum-numbers (values)
-  (when (cl-every #'integerp values) (apply #'+ values)))
+  (when (and values (cl-every #'integerp values)) (apply #'+ values)))
 
 (defun nl-agent-example-bulk-eval--case-record
     (prepared router reader main-selector worker-selector live)

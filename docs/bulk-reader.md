@@ -150,5 +150,66 @@ require exact source context. A negative or inconclusive experiment is a
 valid result; do not enable automatic routing merely because a summary is
 shorter.
 
-The runnable commands, measured results, and requirement-by-requirement
-completion evidence will be recorded after the implementation is verified.
+## Exploratory result, 2026-09-19
+
+The live artifact is `target/bulk-reader/comparison-wjl3rZ/report.sexp`, with
+the measured implementation hashes in the adjacent `implementation.sha256`.
+After measurement, the runner was adjusted to report unavailable totals
+when there are no usable pairs and to silence a compilation warning.
+Neither changes this five-pair result; the reader and corpus hashes still
+match the measured versions.
+The corpus hash is
+`13a0c00f4bc1b49afaae896fd678628c98a28a8371712b042cf59d0b375e4f40`.
+The report retains source snapshots, hashes, prompts' content-byte counts,
+answers, references, and per-call timing. Generated artifacts live under
+`target/`; this document preserves the conclusions independently of them.
+Main calls used temperature 0, a 512-token output limit, and a 60-second
+timeout; worker calls used temperature 0, a 1024-token output limit, a
+60-second timeout, and JSON mode.
+
+| Case | Direct main input bytes | Delegated main input bytes | Worker input bytes | Direct seconds | Worker + main seconds | Manual review |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Short fact | 434 | 976 | 1,152 | 11.80 | 11.24 | Both correct |
+| Large source | 10,718 | 1,180 | 11,550 | 12.50 | 17.85 | Both facts correct in both answers |
+| Multiple files | 610 | 941 | 1,434 | 1.66 | 10.90 | Direct correct; delegated omitted June 18 |
+| Absent answer | 477 | 919 | 1,195 | 1.04 | 10.47 | Direct correct; delegated substituted the general telephone number |
+| Quoted instruction | 629 | 1,184 | 1,347 | 1.92 | 13.22 | Both refused execution; direct reason was only a terse reference to source lines 2 and 4 |
+
+All five pairs returned usable, nonempty responses: observed technical
+failure rate was 0/5 in each branch. This is not a quality pass. Under the
+strict rubric above, direct answers fully satisfy four cases and give a
+partial explanation in the fifth; delegated answers fully satisfy three
+and fail two. In the absent-answer case the cited excerpt itself says that
+the mobile number is not recorded. Exact excerpts and valid hashes did not
+prevent either the worker or main model from giving the wrong answer.
+
+Across all five pairs, main input decreased from 12,868 to 5,200 bytes
+(59.6%). Worker input added 16,678 bytes, making combined input 21,878 bytes
+(70.0% more than direct). The large-source case alone reduced main input
+by 89.0%, but its combined input was 12,730 bytes (18.8% more than direct)
+and its task took longer. Every small-source case increased main input.
+The complete experiment took 92.64 seconds; per-case times above are not
+warm-start or repeated latency estimates. Tokens, billing, energy use,
+and production accuracy were not measured.
+
+Decision: retain this as an optional, evidence-bearing read tool. Do not
+enable automatic delegation by default. Large, narrow factual extraction
+is a candidate for further trials when reducing main context matters;
+the present experiment does not establish a total-cost or speed benefit.
+Missing-answer questions and cross-file completeness need stronger quality
+checks before unattended routing. A production threshold cannot be inferred
+from one synthetic large-source case.
+
+## Completion evidence
+
+- Delegation and hash-checked range retrieval: real venue extraction and
+  range re-fetch, plus permission-checked tool round-trip tests.
+- Boundaries and failures: tests cover forbidden paths, invalid files and
+  schemas, stale hashes, permission denial, and provider failures.
+- Repeatability: the five fixed cases, live runner, and commands above.
+- Assessment: the manual review and byte/time comparison above distinguish
+  technical success from correctness and explicitly retain missing metrics.
+- Verification passed: 15 reader ERT tests, seven evaluation ERT tests,
+  16 local-tools assertions, and 51 existing semantic-evaluation ERT tests.
+  Warning-as-error compilation passed for the reader and evaluation runner.
+  Work completion is recorded through the workspace's DB worklog.

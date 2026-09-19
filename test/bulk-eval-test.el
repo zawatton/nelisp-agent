@@ -17,7 +17,8 @@
 (defun nl-agent-bulk-eval-test--scripted-router (mode calls)
   "Build a deterministic in-memory local/main and local/worker provider.
 MODE controls main output (success, error, empty, or whitespace), and CALLS
-receives `(MODEL MESSAGES OPTIONS)' records in call order."
+receives a one-cell list whose car receives `(MODEL MESSAGES OPTIONS)'
+records in call order."
   (let ((main-count 0))
     (nl-agent-host-router-new
      (list
@@ -28,14 +29,15 @@ receives `(MODEL MESSAGES OPTIONS)' records in call order."
        (lambda (state messages)
          (let ((model (plist-get state :model))
                (options (plist-get state :options)))
-           (push (list model (copy-tree messages) (copy-tree options)) calls)
+           (setcar calls (cons (list model (copy-tree messages) (copy-tree options))
+                               (car calls)))
            (cond
             ((equal model "worker")
              (when (eq mode 'worker-failure)
                (error "scripted worker failure"))
              (let* ((user (cdr (assq 'user messages)))
                     (path (and (string-match
-                                "\\\"path\\\":\\\"\\([^\\\"]+\\\)\\\"" user)
+                                "\"path\":\"\\([^\"]+\\)\"" user)
                                (match-string 1 user)))
                     (absent (and (string-match-p "責任者の携帯電話番号" user) t)))
                (unless absent (unless path (error "scripted worker saw no path")))
@@ -50,8 +52,8 @@ receives `(MODEL MESSAGES OPTIONS)' records in call order."
                ('empty "")
                ('whitespace "   ")
                (_ "scripted main answer")))
-            (t (error "unexpected scripted model: %S" model))))
-       :close (lambda (_state) nil)))))))
+            (t (error "unexpected scripted model: %S" model)))))
+       :close (lambda (_state) nil))))))
 
 (defmacro nl-agent-bulk-eval-test--with-live (&rest body)
   (declare (indent 0))
@@ -62,7 +64,7 @@ receives `(MODEL MESSAGES OPTIONS)' records in call order."
          (setenv "NELISP_AGENT_BULK_EVAL_LIVE" nil)))))
 
 (defun nl-agent-bulk-eval-test--call-count (calls model)
-  (cl-count model calls :key #'car :test #'equal))
+  (cl-count model (car calls) :key #'car :test #'equal))
 
 (ert-deftest nl-agent-bulk-eval-corpus-is-fixed-and-bounded ()
   (let ((corpus (nl-agent-example-bulk-eval-load-corpus)))
@@ -95,7 +97,7 @@ receives `(MODEL MESSAGES OPTIONS)' records in call order."
                                  :paired-combined-input-bytes)))))))
 
 (ert-deftest nl-agent-bulk-eval-live-scripted-success-uses-real-pipeline ()
-  (let ((calls nil))
+  (let ((calls (list nil)))
     (nl-agent-bulk-eval-test--with-live
       (let* ((router (nl-agent-bulk-eval-test--scripted-router 'success calls))
              (report (nl-agent-example-bulk-eval-run
@@ -135,7 +137,7 @@ receives `(MODEL MESSAGES OPTIONS)' records in call order."
                           (plist-get case :sources))))))))))))
 
 (ert-deftest nl-agent-bulk-eval-live-worker-failure-skips-delegated-main ()
-  (let ((calls nil))
+  (let ((calls (list nil)))
     (nl-agent-bulk-eval-test--with-live
       (let* ((router (nl-agent-bulk-eval-test--scripted-router 'worker-failure calls))
              (report (nl-agent-example-bulk-eval-run
@@ -143,14 +145,14 @@ receives `(MODEL MESSAGES OPTIONS)' records in call order."
              (summary (plist-get report :summary)))
         ;; The scripted provider's worker branch is made to fail below.
         (ignore router)
-        (should (= 5 (plist-get summary :paired-cases)))
-        (should (= 0 (plist-get summary :delegated-not-run)))
-        (should (> (plist-get summary :paired-combined-input-bytes) 0))
-        (should (= 10 (nl-agent-bulk-eval-test--call-count calls "main")))))))
+        (should (= 0 (plist-get summary :paired-cases)))
+        (should (= 5 (plist-get summary :delegated-not-run)))
+        (should (null (plist-get summary :paired-combined-input-bytes)))
+        (should (= 5 (nl-agent-bulk-eval-test--call-count calls "main")))))))
 
 (ert-deftest nl-agent-bulk-eval-live-main-failures-are-not-usable ()
   (dolist (mode '(error empty whitespace))
-    (let ((calls nil))
+    (let ((calls (list nil)))
       (nl-agent-bulk-eval-test--with-live
         (let* ((router (nl-agent-bulk-eval-test--scripted-router mode calls))
                (report (nl-agent-example-bulk-eval-run
@@ -172,7 +174,7 @@ receives `(MODEL MESSAGES OPTIONS)' records in call order."
 
 (ert-deftest nl-agent-bulk-eval-invalid-corpus-opens-no-inference ()
   (let ((directory (make-temp-file "nl-bulk-eval-invalid-" t))
-        (calls nil))
+        (calls (list nil)))
     (unwind-protect
         (let ((path (expand-file-name "invalid.sexp" directory)))
           (with-temp-file path
@@ -182,7 +184,7 @@ receives `(MODEL MESSAGES OPTIONS)' records in call order."
              (nl-agent-example-bulk-eval-run
               nil (list (nl-agent-bulk-eval-test--scripted-router 'success calls)
                         "local/main" "local/worker") path)))
-          (should (= 0 (length calls))))
+          (should (= 0 (length (car calls)))))
       (delete-directory directory t))))
 
 (ert-deftest nl-agent-bulk-eval-source-is-large-distractor-fixture ()
