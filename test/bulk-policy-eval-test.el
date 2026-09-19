@@ -313,6 +313,24 @@ This covers the wiring: the kind-aware screen must be the one the runner uses."
                 (plist-get (plist-get (plist-get other :direct) :screening)
                            :proxy-status)))))
 
+(ert-deftest bulk-policy-eval-test-worker-timeout-override ()
+  "The worker timeout defaults to the shipped value and validates overrides.
+A malformed override must signal: a measurement that silently fell back to the
+default would be reported as if it had used the requested limit."
+  (let ((saved (getenv "NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT")))
+    (unwind-protect
+        (progn
+          (setenv "NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT" nil)
+          (should (= 60 (nl-agent-example-bulk-policy--worker-timeout)))
+          (setenv "NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT" "")
+          (should (= 60 (nl-agent-example-bulk-policy--worker-timeout)))
+          (setenv "NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT" "180")
+          (should (= 180 (nl-agent-example-bulk-policy--worker-timeout)))
+          (dolist (bad '("0" "3601" "abc" "60s" "-1"))
+            (setenv "NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT" bad)
+            (should-error (nl-agent-example-bulk-policy--worker-timeout))))
+      (setenv "NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT" saved))))
+
 (when noninteractive
   (ert-run-tests-batch-and-exit))
 

@@ -791,11 +791,71 @@ live run as they did in replay.
 
 ### What this does not settle
 
-The 60-second worker timeout is now the binding constraint for a reasoning
-model, and it was not changed here, so nothing above says what `qwen3:4b`
-would do with more time. Raising it trades wall-clock against failure rate and
-that has not been measured. Combined-input totals for `qwen3:4b` cover only
-the four paired cases and are not comparable with the other two runs.
+Combined-input totals for `qwen3:4b` cover only the four paired cases and are
+not comparable with the other two runs. The timeout question is answered in
+the next section.
+
+## The timeout, and what it was not: 2026-09-19
+
+Before measuring, one hypothesis had to be ruled out. The reported
+`prompt_tokens` for one identical request moved from 358 at the 1024 budget to
+2317 at 4096, and Ollama showed a 4096-token context while running, which
+together look exactly like context overflow and window shifting.
+
+They are not. Sending the same request to the native endpoint twice, changing
+only the context window, gives identical results:
+
+| `num_ctx` | Seconds | `prompt_eval_count` | `eval_count` | Content |
+| ---: | ---: | ---: | ---: | --- |
+| 4,096 | 76.9 | 2,317 | 36 | correct JSON |
+| 16,384 | 78.6 | 2,317 | 36 | byte-identical |
+
+Quadrupling the window changed nothing, so no shifting was occurring. The
+token count moved for a duller reason: Ollama counts the thinking tokens as
+the prompt for generating the answer. At the 1024 budget the model never
+finished thinking, so the prompt stayed at 358 and the completion pinned at
+the cap; at 4096 the thinking completed and moved to the prompt side, leaving
+36 tokens of answer. The model's own context length is 262,144, so there was
+never a window problem to have.
+
+What binds is wall clock: 77 to 79 seconds to produce the thinking and the
+answer, against a 60-second worker timeout.
+
+### `qwen3:4b` at a 180-second timeout
+
+Artifact: `target/bulk-policy/live-timeout180-qwen3-4b-20260919-212814/`. The
+**only** change from the run above is the timeout; budget, models and corpus
+are identical. Only this worker was re-run, because the other two peaked at
+18.8 and 12.7 seconds and no timeout change can reach them.
+
+Eight of nine calls returned usable results, against four at 60 seconds. Four
+of the newly successful calls took 65.6, 77.5, 84.7 and 129.5 seconds, so the
+old limit was cutting off work that was progressing normally.
+
+**All six routed cases were answered correctly**, with no rejection and no
+fallback in the exercise arm. That includes `absent-answer`, where the answer
+was 「携帯電話番号はこの資料には記載されていません。」 — the case both other
+workers got wrong, one by substituting the general telephone number and the
+other by doing the same while citing narrowly. The cheapest worker tested is
+the only one that answered it correctly.
+
+The one remaining failure is `conflicting-sources`, which returned empty
+content after 129.5 seconds without hitting the timeout. It surfaced as
+`empty-provider-output`, the code added for exactly this shape, so the report
+names it instead of reporting a parse error. Why the content was empty is not
+established: the provider exposes no `finish_reason`, and this run did not
+probe it. That case is excluded from delegation by default anyway.
+
+The cost is time. The run took 664.6 seconds against 213.5 for the same worker
+at the 60-second limit, because calls that used to be cut off now run to
+completion. That is the trade a longer timeout buys: fewer failed delegations,
+more wall clock per case.
+
+The shipped default is still 60 seconds. The evaluation runner reads
+`NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT` so the limit can be varied without
+editing code, and a malformed value is an error rather than a silent fallback
+to the default, because a measurement that quietly used 60 while reporting 180
+would be worse than no measurement.
 
 ## Not measured
 
@@ -819,11 +879,13 @@ per worker.
 The worker comparisons above carry their own limits. `hermes3:8b` is quantised
 Q4_0 against the baseline worker's Q4_K_M, so a difference observed against it
 confounds model and quantisation, and at 8B it is not a cheap worker. The
-`qwen3:4b` empty responses were diagnosed as output-budget exhaustion and the
-re-measurement above covers the larger budget, so that gap is closed. What
-remains open there is the timeout: five of its nine calls now end at exactly
-the 60-second limit, and no run has been made with a longer one. No run was
-repeated, so none of these supports a latency comparison either.
+`qwen3:4b` empty responses were diagnosed as output-budget exhaustion, and the
+re-measurements above cover both the larger budget and a longer timeout, so
+those gaps are closed. Its quality is now measured on this corpus: six of six
+routed cases correct. That is one run of one model on nine synthetic cases and
+does not rank workers. No run was repeated, so none of these supports a
+latency comparison either; the 664.6 against 213.5 second figures are wall
+clock for a single pass each, not latency measurements.
 
 The two worker comparison sections above were measured at the 1024 budget and
 with the earlier diagnostics. Their quality findings were reproduced at 4096,

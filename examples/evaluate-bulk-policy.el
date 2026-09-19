@@ -134,6 +134,27 @@ Conflict cases always yield proxy-review, never proxy-pass."
                   'proxy-pass 'proxy-review)))
           :semantic-review 'unreviewed)))
 
+(defconst nl-agent-example-bulk-policy--default-worker-timeout 60
+  "Seconds allowed for one worker call unless the environment overrides it.
+The shipped value.  A reasoning worker can exceed it: `qwen3:4b' ended five of
+nine calls at exactly this limit, which is why the limit is a measurable knob
+rather than a constant.")
+
+(defun nl-agent-example-bulk-policy--worker-timeout ()
+  "Return the worker timeout in seconds.
+`NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT' overrides the default when it holds a
+positive integer of at most 3600.  A malformed value is an error rather than a
+silent fallback, because a measurement that quietly used the default would be
+reported as if it had used the requested limit."
+  (let ((raw (getenv "NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT")))
+    (if (or (null raw) (string-empty-p (string-trim raw)))
+        nl-agent-example-bulk-policy--default-worker-timeout
+      (let ((value (and (string-match-p "\\`[0-9]+\\'" (string-trim raw))
+                        (string-to-number (string-trim raw)))))
+        (unless (and value (<= 1 value 3600))
+          (error "NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT must be 1..3600, got %S" raw))
+        value))))
+
 (defconst nl-agent-example-bulk-policy--arm-specs
   '((policy-conservative . nil)
     (policy-exercise . (:mode opt-in :min-source-bytes 0 :max-paths 2 :fallback t)))
@@ -512,7 +533,9 @@ FROZEN-CORPUS-PATH and POLICY-CORPUS-PATH are optional validation paths."
                              :close (lambda (&rest _) nil))))))
          (reader (nl-agent-bulk-reader-new
                   router worker-selector (list worker-selector) root
-                  :max-tokens 4096 :timeout-sec 60 :temperature 0.0
+                  :max-tokens 4096
+                  :timeout-sec (nl-agent-example-bulk-policy--worker-timeout)
+                  :temperature 0.0
                   :json-mode (and live t)))
          (started (float-time))
          (prepared nil))
