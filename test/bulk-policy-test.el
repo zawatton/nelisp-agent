@@ -778,5 +778,118 @@ This removes the false positive both live runs produced on absent-field."
                    policy (nl-agent-bulk-policy-test--absence-request
                            :sources '((:path "" :text "x")))))))
 
+;; Tests 43-48: coverage counting separates a missing fact from a missing
+;; citation.  Both directions come from the recorded live runs on
+;; multi-file-negation: llama3.2:3b dropped a fact and cited one file, while
+;; hermes3:8b answered completely and still cited one file.
+
+(defconst nl-agent-bulk-policy-test--multi-sources
+  '((:path "project.txt" :text "プロジェクト日程\n搬入日は6月18日です。\n作業場所は東棟です。\n")
+    (:path "rules.txt" :text "作業規則\n通常時間の作業は申請済みです。\n夜間作業は許可されていません。\n安全確認を先に行います。\n"))
+  "The two-file snapshot behind the observed coverage cases.")
+
+(defun nl-agent-bulk-policy-test--multi-request (&rest extra)
+  (append (list :question "搬入日と夜間作業について答えてください"
+                :paths '("project.txt" "rules.txt")
+                :source-bytes 10000 :question-kind 'fact)
+          extra))
+
+(defun nl-agent-bulk-policy-test--multi-worker (answer cited-path cited-text)
+  (nl-agent-bulk-policy-test--make-worker-fixture
+   200 100 2.0
+   :status 'needs-review :answer answer
+   :references (list (list :path cited-path :start-line 2 :end-line 3
+                           :sha256 (make-string 64 ?a) :text cited-text))))
+
+(ert-deftest nl-agent-bulk-policy-test-coverage-still-rejects-a-missing-fact ()
+  "The observed true positive: the answer drops a fact from the uncited file."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0 :max-paths 2))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--multi-request
+                 :sources nl-agent-bulk-policy-test--multi-sources)
+                (nl-agent-bulk-policy-test--multi-worker
+                 "夜間作業は許可されていません。"
+                 "rules.txt" "夜間作業は許可されていません。\n安全確認を先に行います。"))))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should (cl-some (lambda (d) (eq (plist-get d :code) 'partial-source-coverage))
+                     (plist-get diag :diagnostics)))
+    (should (string-match-p "project.txt"
+                            (plist-get (cl-find 'partial-source-coverage
+                                                (plist-get diag :diagnostics)
+                                                :key (lambda (d) (plist-get d :code)))
+                                       :detail)))))
+
+(ert-deftest nl-agent-bulk-policy-test-coverage-accepts-a-complete-answer ()
+  "The observed false positive: a complete answer that cited only one file.
+The uncited file's wording appears verbatim in the answer, so the defect is the
+citation, recorded as a note, not a missing fact."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0 :max-paths 2))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--multi-request
+                 :sources nl-agent-bulk-policy-test--multi-sources)
+                (nl-agent-bulk-policy-test--multi-worker
+                 "搬入日は6月18日ですが、夜間作業は許可されていません。"
+                 "project.txt" "搬入日は6月18日です。"))))
+    (should (eq 'accept-for-review (plist-get diag :disposition)))
+    (should-not (cl-some (lambda (d) (eq (plist-get d :code) 'partial-source-coverage))
+                         (plist-get diag :diagnostics)))
+    (should (cl-some (lambda (d) (and (eq (plist-get d :code) 'uncited-source-used)
+                                      (eq (plist-get d :severity) 'note)))
+                     (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-coverage-needs-a-long-shared-span ()
+  "A short coincidental overlap is not evidence that the source was used.
+Here the answer and the uncited file share 作業 only, which is well under the
+default span, so the rejection stands."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0 :max-paths 2))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--multi-request
+                 :sources nl-agent-bulk-policy-test--multi-sources)
+                (nl-agent-bulk-policy-test--multi-worker
+                 "作業について特筆事項はありません。"
+                 "project.txt" "搬入日は6月18日です。"))))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should (cl-some (lambda (d) (eq (plist-get d :code) 'partial-source-coverage))
+                     (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-coverage-exemption-can-be-disabled ()
+  "Setting coverage-overlap-chars to nil restores strict coverage counting."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0 :max-paths 2
+                                           :coverage-overlap-chars nil))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--multi-request
+                 :sources nl-agent-bulk-policy-test--multi-sources)
+                (nl-agent-bulk-policy-test--multi-worker
+                 "搬入日は6月18日ですが、夜間作業は許可されていません。"
+                 "project.txt" "搬入日は6月18日です。"))))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should (cl-some (lambda (d) (eq (plist-get d :code) 'partial-source-coverage))
+                     (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-coverage-without-sources-stays-strict ()
+  "With no snapshot there is no evidence, and the conservative reading wins."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0 :max-paths 2
+                                           :uncited-absence-screen nil))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--multi-request)
+                (nl-agent-bulk-policy-test--multi-worker
+                 "搬入日は6月18日ですが、夜間作業は許可されていません。"
+                 "project.txt" "搬入日は6月18日です。"))))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should (cl-some (lambda (d) (eq (plist-get d :code) 'partial-source-coverage))
+                     (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-coverage-overlap-chars-validation ()
+  (should-error (nl-agent-bulk-policy-new :coverage-overlap-chars 1))
+  (should-error (nl-agent-bulk-policy-new :coverage-overlap-chars 257))
+  (should-error (nl-agent-bulk-policy-new :coverage-overlap-chars "8"))
+  (should (nl-agent-bulk-policy-p (nl-agent-bulk-policy-new :coverage-overlap-chars nil)))
+  (should (nl-agent-bulk-policy-p (nl-agent-bulk-policy-new :coverage-overlap-chars 2))))
+
 (when noninteractive
   (ert-run-tests-batch-and-exit))

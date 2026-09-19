@@ -33,7 +33,7 @@ question, not a claim that the class has been made safe.  See
 (cl-defstruct (nl-agent-bulk-policy (:constructor nl-agent-bulk-policy--make))
   mode min-source-bytes max-paths max-question-bytes fallback absence-markers
   numeral-screen excluded-question-kinds require-question-kind
-  uncited-absence-screen)
+  uncited-absence-screen coverage-overlap-chars)
 
 (defun nl-agent-bulk-policy--validate-keys (keys allowed where)
   (unless (and (listp keys) (proper-list-p keys) (= 0 (% (length keys) 2)))
@@ -55,11 +55,12 @@ question, not a claim that the class has been made safe.  See
         (excluded-question-kinds
          (copy-sequence nl-agent-bulk-policy-default-excluded-question-kinds))
         (require-question-kind t)
-        (uncited-absence-screen 'reject))
+        (uncited-absence-screen 'reject)
+        (coverage-overlap-chars 8))
     (nl-agent-bulk-policy--validate-keys keys
       '(:mode :min-source-bytes :max-paths :max-question-bytes :fallback :absence-markers
         :numeral-screen :excluded-question-kinds :require-question-kind
-        :uncited-absence-screen)
+        :uncited-absence-screen :coverage-overlap-chars)
       "nl-agent-bulk-policy-new")
     (while keys
       (pcase (pop keys)
@@ -72,7 +73,8 @@ question, not a claim that the class has been made safe.  See
         (:numeral-screen (setq numeral-screen (pop keys)))
         (:excluded-question-kinds (setq excluded-question-kinds (pop keys)))
         (:require-question-kind (setq require-question-kind (pop keys)))
-        (:uncited-absence-screen (setq uncited-absence-screen (pop keys)))))
+        (:uncited-absence-screen (setq uncited-absence-screen (pop keys)))
+        (:coverage-overlap-chars (setq coverage-overlap-chars (pop keys)))))
     (unless (memq mode '(direct-only opt-in)) (error "mode must be direct-only or opt-in, got %S" mode))
     (unless (and (integerp min-source-bytes) (>= min-source-bytes 0) (<= min-source-bytes 131072))
       (error "min-source-bytes must be 0..131072, got %S" min-source-bytes))
@@ -98,12 +100,18 @@ question, not a claim that the class has been made safe.  See
       (error "require-question-kind must be t or nil, got %S" require-question-kind))
     (unless (memq uncited-absence-screen '(reject note nil))
       (error "uncited-absence-screen must be reject, note or nil, got %S" uncited-absence-screen))
+    (unless (or (null coverage-overlap-chars)
+                (and (integerp coverage-overlap-chars)
+                     (<= 2 coverage-overlap-chars 256)))
+      (error "coverage-overlap-chars must be an integer 2..256 or nil, got %S"
+             coverage-overlap-chars))
     (nl-agent-bulk-policy--make :mode mode :min-source-bytes min-source-bytes :max-paths max-paths
                                  :max-question-bytes max-question-bytes :fallback fallback
                                  :absence-markers absence-markers :numeral-screen numeral-screen
                                  :excluded-question-kinds excluded-question-kinds
                                  :require-question-kind require-question-kind
-                                 :uncited-absence-screen uncited-absence-screen)))
+                                 :uncited-absence-screen uncited-absence-screen
+                                 :coverage-overlap-chars coverage-overlap-chars)))
 
 (defun nl-agent-bulk-policy--validate-request (request)
   (unless (and (listp request) (proper-list-p request)) (error "request must be a proper list"))
@@ -200,6 +208,46 @@ the class has been made safe."
                             (nl-agent-bulk-policy-min-source-bytes policy))))
      (t (list :path 'delegated :reason 'admitted :detail "Admitted for delegation")))))
 
+(defun nl-agent-bulk-policy--collapse-whitespace (text)
+  "Return TEXT with every run of whitespace collapsed to one space.
+Source text carries line breaks an answer does not reproduce, so spans are
+compared in this normalised form."
+  (string-trim (replace-regexp-in-string "[ \t\n\r\f\v　]+" " " text)))
+
+(defun nl-agent-bulk-policy--shared-span-p (answer text span)
+  "Return non-nil when ANSWER and TEXT share a run of SPAN characters.
+
+Both are whitespace-normalised first.  Every window of the answer is searched
+for in the source rather than the reverse, because the answer is bounded at
+2048 characters while a source may be 64 KiB."
+  (let* ((needle-source (nl-agent-bulk-policy--collapse-whitespace answer))
+         (haystack (nl-agent-bulk-policy--collapse-whitespace text))
+         (limit (- (length needle-source) span))
+         (index 0)
+         (found nil))
+    (while (and (not found) (<= index limit))
+      (when (string-search (substring needle-source index (+ index span)) haystack)
+        (setq found t))
+      (setq index (1+ index)))
+    found))
+
+(defun nl-agent-bulk-policy--answer-uses-source-p (policy answer path sources)
+  "Return non-nil when ANSWER visibly reuses the text of PATH within SOURCES.
+
+The evidence required is an exact shared span of `coverage-overlap-chars'
+characters.  A span that long is unlikely to coincide by chance, which matters
+because suppressing a coverage rejection on weak evidence would let a genuinely
+incomplete answer through.  When the slot is nil, or the source text is not
+available, there is no evidence and the answer counts as not using it."
+  (let ((span (nl-agent-bulk-policy-coverage-overlap-chars policy)))
+    (and span (stringp answer)
+         (let ((source (cl-find path sources
+                                :key (lambda (entry) (plist-get entry :path))
+                                :test #'equal)))
+           (and source
+                (nl-agent-bulk-policy--shared-span-p
+                 answer (plist-get source :text) span))))))
+
 (defun nl-agent-bulk-policy--absence-reported-p (policy text)
   "Return non-nil when TEXT itself reports an absence under POLICY's markers.
 
@@ -286,12 +334,32 @@ value anyway is exempt too, which is a known limitation recorded in
 (t (push ref valid-refs))))
           (setq references (nreverse valid-refs)))
         (when (and (not not-found) (> (length paths) 1))
-          (let ((ref-paths (delete-dups (mapcar (lambda (ref) (plist-get ref :path)) references))) (uncovered nil))
+          (let ((ref-paths (delete-dups (mapcar (lambda (ref) (plist-get ref :path)) references)))
+                (uncovered nil))
             (dolist (path paths) (unless (member path ref-paths) (push path uncovered)))
-            (when uncovered
-              (push (list :code 'partial-source-coverage :severity 'reject
-                          :detail (format "Uncovered paths: %s" (string-join uncovered ", "))) diagnostics)
-              (setq disposition 'reject))))
+            (setq uncovered (nreverse uncovered))
+            ;; An uncovered path whose text the answer visibly reuses was read
+            ;; and left uncited: that is a citation defect, not a missing fact.
+            ;; Separating the two stops a complete answer from being rejected
+            ;; for citing narrowly, which was observed: see docs/bulk-policy.md.
+            ;; Without :sources the split cannot be made, and the strict reading
+            ;; is kept because it is the conservative one.
+            (let ((unused nil) (used-uncited nil))
+              (dolist (path uncovered)
+                (if (nl-agent-bulk-policy--answer-uses-source-p policy answer path sources)
+                    (push path used-uncited)
+                  (push path unused)))
+              (setq unused (nreverse unused) used-uncited (nreverse used-uncited))
+              (when used-uncited
+                (push (list :code 'uncited-source-used :severity 'note
+                            :detail (format "Answer reuses text from uncited sources: %s"
+                                            (string-join used-uncited ", ")))
+                      diagnostics))
+              (when unused
+                (push (list :code 'partial-source-coverage :severity 'reject
+                            :detail (format "Uncovered paths: %s" (string-join unused ", ")))
+                      diagnostics)
+                (setq disposition 'reject)))))
         ;; Absence screening.  An answer that itself reports an absence agrees
         ;; with the source and is not in conflict with it, so it is exempt: that
         ;; is what stops a correct absence answer from being rejected for citing

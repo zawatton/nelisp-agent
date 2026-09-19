@@ -106,8 +106,24 @@ answer is not usable without fallback or human correction.
   - Indicates the worker output could not be parsed or validated.
 
 **`partial-source-coverage`** (severity: reject)
-  - A multi-file request has at least one path with no corresponding reference.
-  - Indicates the worker did not read all supplied sources.
+  - A multi-file request has at least one path that is neither cited nor
+    visibly used by the answer.
+  - Indicates a fact from that source is probably missing from the answer.
+  - "Visibly used" means the answer shares an exact run of
+    `coverage-overlap-chars` characters (default 8, whitespace normalised)
+    with that source. Such a span is unlikely to coincide by chance, which
+    matters because exempting a path on weak evidence would let a genuinely
+    incomplete answer through. Setting the slot to nil restores strict
+    counting, and without `:sources` there is no evidence, so the strict
+    reading applies.
+
+**`uncited-source-used`** (severity: note)
+  - A requested path was not cited, but the answer reuses its wording.
+  - The worker read the source and failed to cite it: a citation defect, not a
+    missing fact, so it is recorded rather than rejected. This is what stops a
+    complete answer from being rejected for citing narrowly — observed with
+    `hermes3:8b` on `multi-file-negation`, which answered both facts while
+    citing one of the two files.
 
 **`absence-marker-conflict`** (severity: reject)
   - A **cited** reference contains an absence marker (e.g. 記載されていません)
@@ -522,7 +538,7 @@ admission and never diagnosed at all.
 ### Live confirmation, 2026-09-19 (hermes3:8b, after the change)
 
 The artifact is
-`target/bulk-policy/live-verify-absence-screen-hermes3-8b-20260919-192611/report.sexp`,
+`target/bulk-policy/live-verify-absence-screen-hermes3-8b-20260919-192610/report.sexp`,
 whose `implementation.sha256` records the commit as well as the source hashes.
 Same main model, same worker, same settings; 214.0 seconds.
 
@@ -551,14 +567,45 @@ This is one run of one model on one corpus. It confirms that the replayed
 behaviour also occurs in a real run; it measures nothing new about quality or
 cost.
 
-Two things this did **not** fix. The first was re-confirmed in that run:
-`partial-source-coverage` still rejects `hermes3:8b`'s correct two-fact answer
-on `multi-file-negation`, because that answer cited one file. Coverage
-counting measures citation completeness, and nothing here changed that. The
-second has still never been observed: an answer that reports the absence *and
-then supplies a value anyway* is exempt from both absence codes, because the
+Two things this did not fix at the time. The first, `partial-source-coverage`
+rejecting `hermes3:8b`'s correct two-fact answer on `multi-file-negation`
+because it cited one file, has since been addressed; see below. The second has
+still never been observed: an answer that reports the absence *and then
+supplies a value anyway* is exempt from both absence codes, because the
 exemption is literal. Inventing a sharper rule without a case to test it
 against would be guesswork, so none was written.
+
+### Coverage counting now separates a missing fact from a missing citation
+
+The same recorded runs disagreed about what an uncited file means.
+`llama3.2:3b` cited `rules.txt` only and its answer dropped the June 18
+delivery date that lives in `project.txt` — a missing fact.  `hermes3:8b`
+cited `project.txt` only and its answer carried both facts, reproducing
+`rules.txt`'s wording verbatim — a missing citation.  Citation coverage alone
+cannot tell them apart, so the check now asks whether the answer visibly
+reuses the uncited source: an exact shared span of `coverage-overlap-chars`
+characters. An uncited path the answer reuses becomes a `uncited-source-used`
+note; the rest still reject.
+
+Replaying the three recorded runs through the current check:
+
+| Run | `multi-file-negation` before | after |
+| --- | --- | --- |
+| `llama3.2:3b` baseline | reject, `partial-source-coverage` | **unchanged**, still rejected |
+| `hermes3:8b` comparison | reject on a correct answer | **accept**, `uncited-source-used` note |
+| `hermes3:8b` verification | reject on a correct answer | **accept**, `uncited-source-used` note |
+
+The true positive survives and the false positive is gone, measured against
+recorded model output. The span length is a judgement, not a measured
+threshold: 8 characters is long enough that a coincidental match is unlikely
+in the observed corpus, and short enough to catch a short reused clause. A
+host that disagrees sets `coverage-overlap-chars`, and nil restores the strict
+behaviour.
+
+What this still cannot see: an answer that uses a source and paraphrases it
+completely leaves no shared span, so it is treated as a missing fact and
+rejected. That direction costs a fallback rather than a wrong answer, which is
+the trade this module takes everywhere.
 
 ### The worker model does not change the byte economics
 
