@@ -73,27 +73,42 @@
     ("multi-fact" . multi-fact)
     ("absent-field" . absence)
     ("conflicting-sources" . conflict)
-    ("quoted-instruction-embedded" . quoted-instruction))
+    ("quoted-instruction-embedded" . quoted-instruction)
+    ;; The excluded-kind corpus.  Both kinds are refused delegation by default,
+    ;; so these cases exist to judge that refusal on more than two examples.
+    ("conflict-unresolvable" . conflict)
+    ("conflict-within-file" . conflict)
+    ("conflict-by-date" . conflict)
+    ("quoted-instruction-as-data" . quoted-instruction)
+    ("quoted-instruction-other-party" . quoted-instruction))
   "Alist mapping case id to review kind. Conflict cases never report proxy-pass.")
 
-(defun nl-agent-example-bulk-policy-load-cases (&optional frozen-corpus-path policy-corpus-path)
-  "Load both frozen and policy corpora, validating the frozen hash.
+(defun nl-agent-example-bulk-policy-load-cases
+    (&optional frozen-corpus-path policy-corpus-path excluded-corpus-path)
+  "Load the frozen, policy and excluded-kind corpora, validating the frozen hash.
 Signal an error if the frozen corpus hash is not the expected constant.
-Returns a list of nine cases in order: frozen five, then policy four."
+Returns fourteen cases in order: frozen five, policy four, excluded five.
+The frozen loader caps a corpus at five cases, which is why the excluded-kind
+cases live in a third file rather than being appended to the policy one."
   (let* ((frozen-path (or frozen-corpus-path
                          (expand-file-name "examples/bulk-reader-corpus.sexp"
                                          nl-agent-example-bulk-policy-root)))
          (policy-path (or policy-corpus-path
                          (expand-file-name "examples/bulk-policy-corpus.sexp"
                                          nl-agent-example-bulk-policy-root)))
+         (excluded-path (or excluded-corpus-path
+                           (expand-file-name "examples/bulk-excluded-corpus.sexp"
+                                           nl-agent-example-bulk-policy-root)))
          (frozen (nl-agent-example-bulk-eval-load-corpus frozen-path))
          (frozen-hash (plist-get frozen :hash)))
     (unless (equal frozen-hash nl-agent-example-bulk-policy--frozen-corpus-hash)
       (error "frozen corpus hash mismatch: expected %s, got %s"
              nl-agent-example-bulk-policy--frozen-corpus-hash frozen-hash))
     (let* ((policy (nl-agent-example-bulk-eval-load-corpus policy-path))
+           (excluded (nl-agent-example-bulk-eval-load-corpus excluded-path))
            (all-cases (append (plist-get frozen :cases)
-                             (plist-get policy :cases)))
+                             (plist-get policy :cases)
+                             (plist-get excluded :cases)))
            (all-ids (mapcar (lambda (c) (plist-get c :id)) all-cases)))
       ;; Validate that every id has a review kind.
       (dolist (id all-ids)
@@ -102,8 +117,10 @@ Returns a list of nine cases in order: frozen five, then policy four."
       (list :total (length all-cases)
             :frozen (length (plist-get frozen :cases))
             :policy (length (plist-get policy :cases))
+            :excluded (length (plist-get excluded :cases))
             :frozen-hash (plist-get frozen :hash)
             :policy-hash (plist-get policy :hash)
+            :excluded-hash (plist-get excluded :hash)
             :cases all-cases))))
 
 (defun nl-agent-example-bulk-policy--get-kind (case-id)

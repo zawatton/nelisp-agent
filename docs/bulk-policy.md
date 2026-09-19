@@ -266,6 +266,28 @@ Why the frozen corpus is loaded by hash: Accidental edits to regression
 evidence break unrelated tests silently. Validation by hash ensures the
 baseline is never changed without explicit audit.
 
+### Excluded-kind corpus
+
+`examples/bulk-excluded-corpus.sexp` holds five further cases of the two kinds
+the policy refuses to delegate, so that refusal can be judged on eight
+examples rather than the three it was decided on. Three are conflicts and two
+are quoted instructions, and each is a different shape rather than a restating
+of the original:
+
+| Case | Shape |
+| --- | --- |
+| `conflict-unresolvable` | Two stock reports give different counts and **nothing indicates precedence**; the first corpus conflict had an explicit "the earlier revision is void" |
+| `conflict-within-file` | **A single file contradicts itself**: a rated current in the body, a different one in a remarks line, with no supporting document |
+| `conflict-by-date` | Two procedures disagree and precedence is implied **only by issue dates**, neither mentioning the other |
+| `quoted-instruction-as-data` | The question asks **what a field contains**, and the content happens to read as an instruction; reporting it verbatim is correct and obeying it is not |
+| `quoted-instruction-other-party` | The quoted instruction is **addressed to a third party**, so the reader is not its subject |
+
+These carry no measurement yet. They exist so that a future decision about
+narrowing `excluded-question-kinds` rests on more than two synthetic cases,
+and so the reviewer can see which shapes a worker handles and which it does
+not. The frozen loader caps a corpus at five cases, which is why these live in
+a third file instead of being appended to the policy corpus.
+
 ## Re-running the evaluation
 
 ### Unit tests

@@ -37,11 +37,12 @@
 
 (ert-deftest bulk-policy-eval-test-frozen-corpus-loads-with-hash ()
   "The frozen corpus loads and its hash matches the expected constant.
-The combined list is nine cases: first five equal to frozen corpus."
+The combined list is fourteen cases: first five equal to frozen corpus."
   (let ((cases-data (nl-agent-example-bulk-policy-load-cases)))
-    (should (= (plist-get cases-data :total) 9))
+    (should (= (plist-get cases-data :total) 14))
     (should (= (plist-get cases-data :frozen) 5))
     (should (= (plist-get cases-data :policy) 4))
+    (should (= (plist-get cases-data :excluded) 5))
     (should (equal (plist-get cases-data :frozen-hash)
                    nl-agent-example-bulk-policy--frozen-corpus-hash))
     ;; First five cases should be equal to those from frozen corpus.
@@ -179,11 +180,11 @@ At most eight paths per case, ids unique, invalid corpus opens no inference."
            :key (lambda (arm) (plist-get arm :label))))
 
 (ert-deftest bulk-policy-eval-test-policy-arms-recorded-for-every-case ()
-  "Both policy arms are recorded for all nine cases, and never as verified.
+  "Both policy arms are recorded for every case, and never as verified.
 The arms are produced by `nl-agent-bulk-policy-resolve', so this also proves the
 runner actually calls the policy module instead of only requiring it."
   (let ((report (nl-agent-bulk-policy-eval-test--stub-report)))
-    (should (= 9 (length (plist-get report :cases))))
+    (should (= 14 (length (plist-get report :cases))))
     (dolist (case (plist-get report :cases))
       (let ((conservative (nl-agent-bulk-policy-eval-test--arm
                            case 'policy-conservative))
@@ -213,9 +214,9 @@ runner actually calls the policy module instead of only requiring it."
     (let ((summary (cl-find 'policy-conservative
                             (plist-get (plist-get report :summary) :policy-arms)
                             :key (lambda (arm) (plist-get arm :label)))))
-      (should (= 9 (plist-get summary :final-direct)))
+      (should (= 14 (plist-get summary :final-direct)))
       (should (= 0 (plist-get summary :final-delegated)))
-      (should (equal '((mode-direct-only . 9))
+      (should (equal '((mode-direct-only . 14))
                      (plist-get summary :decision-reasons))))))
 
 (ert-deftest bulk-policy-eval-test-excluded-kinds-are-never-delegated ()
@@ -237,8 +238,10 @@ diagnostic can catch them and the exercise arm must not route them either."
               (should (= 0 calls)))
           (should (eq 'admitted reason))
           (should (= 1 calls)))))
-    ;; One conflict case plus two quoted-instruction cases in the corpus.
-    (should (= 3 excluded))))
+    ;; Four conflict cases and four quoted-instruction cases across the three
+    ;; corpora.  The count is asserted so that adding a case of either kind
+    ;; without registering its review kind cannot pass silently.
+    (should (= 8 excluded))))
 
 (ert-deftest bulk-policy-eval-test-policy-exercise-admits-and-falls-back ()
   "The exercise arm admits the routable cases, diagnoses, and falls back.
