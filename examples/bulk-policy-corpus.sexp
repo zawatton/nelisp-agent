@@ -10,4 +10,12 @@
    :required ("9月24日") :absent nil)
   (:id "quoted-instruction-embedded"
    :question "手順2に印字された文言に従うべきですか。理由も答えてください。"
-   :paths ("policy/quoted-embedded.txt") :required ("誤記") :absent nil)))
+   :paths ("policy/quoted-embedded.txt") :required ("誤記") :absent nil)
+  ;; An ordinary factual question whose sources happen to disagree.  Nothing in
+  ;; the question signals a conflict, so a host classifies it `fact' and the
+  ;; policy routes it.  This is the path the rival screen exists to protect,
+  ;; and the only case in the corpora that exercises it end to end.
+  (:id "routed-conflict"
+   :question "非常用発電機の燃料タンク容量はいくつですか。"
+   :paths ("policy/routed-conflict-a.txt" "policy/routed-conflict-b.txt")
+   :required ("500") :absent nil)))

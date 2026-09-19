@@ -336,6 +336,16 @@ shape of one of those kinds. Its value is elsewhere, on the questions the
 policy does route, where the sources happen to disagree and nothing previously
 looked.
 
+`routed-conflict` in the policy corpus is that case, and the only one in any
+corpus that exercises the screen through the policy rather than against it
+directly. Two maintenance records give different fuel-tank capacities and the
+question asks for the capacity plainly, so a host classifies it `fact` and the
+policy admits it. The exercise arm then routes it, the screen rejects, the
+bounded fallback runs and the final answer comes from the direct read. Every
+other contradiction in the corpora belongs to a kind the policy refuses before
+the screen is reached, so without this case the screen had never been shown
+doing the job it was built for.
+
 The 86 answers come from 14 distinct cases repeated across runs, so on their
 own the zero false positives would be a weaker result than the number
 suggests. That is why `examples/bulk-dense-corpus.sexp` exists: repeated

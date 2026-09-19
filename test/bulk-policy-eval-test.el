@@ -37,11 +37,11 @@
 
 (ert-deftest bulk-policy-eval-test-frozen-corpus-loads-with-hash ()
   "The frozen corpus loads and its hash matches the expected constant.
-The combined list is fourteen cases: first five equal to frozen corpus."
+The combined list is fifteen cases: first five equal to frozen corpus."
   (let ((cases-data (nl-agent-example-bulk-policy-load-cases)))
-    (should (= (plist-get cases-data :total) 14))
+    (should (= (plist-get cases-data :total) 15))
     (should (= (plist-get cases-data :frozen) 5))
-    (should (= (plist-get cases-data :policy) 4))
+    (should (= (plist-get cases-data :policy) 5))
     (should (= (plist-get cases-data :excluded) 5))
     (should (equal (plist-get cases-data :frozen-hash)
                    nl-agent-example-bulk-policy--frozen-corpus-hash))
@@ -184,7 +184,7 @@ At most eight paths per case, ids unique, invalid corpus opens no inference."
 The arms are produced by `nl-agent-bulk-policy-resolve', so this also proves the
 runner actually calls the policy module instead of only requiring it."
   (let ((report (nl-agent-bulk-policy-eval-test--stub-report)))
-    (should (= 14 (length (plist-get report :cases))))
+    (should (= 15 (length (plist-get report :cases))))
     (dolist (case (plist-get report :cases))
       (let ((conservative (nl-agent-bulk-policy-eval-test--arm
                            case 'policy-conservative))
@@ -214,9 +214,9 @@ runner actually calls the policy module instead of only requiring it."
     (let ((summary (cl-find 'policy-conservative
                             (plist-get (plist-get report :summary) :policy-arms)
                             :key (lambda (arm) (plist-get arm :label)))))
-      (should (= 14 (plist-get summary :final-direct)))
+      (should (= 15 (plist-get summary :final-direct)))
       (should (= 0 (plist-get summary :final-delegated)))
-      (should (equal '((mode-direct-only . 14))
+      (should (equal '((mode-direct-only . 15))
                      (plist-get summary :decision-reasons))))))
 
 (ert-deftest bulk-policy-eval-test-excluded-kinds-are-never-delegated ()
@@ -253,7 +253,7 @@ Cases whose kind the policy excludes are covered by the test above."
                               (plist-get report :cases)))
          (codes nil)
          (rejected 0))
-    (should (= 6 (length cases)))
+    (should (= 7 (length cases)))
     (dolist (case cases)
       (let ((arm (nl-agent-bulk-policy-eval-test--arm case 'policy-exercise)))
         (should (eq 'admitted (plist-get (plist-get arm :decision) :reason)))
@@ -393,6 +393,30 @@ working in English should set `rival-value-screen' to `note'."
   (should (equal '("en-readings" "en-procedure-conflict" "en-datasheet-footnote")
                  (nl-agent-bulk-policy-eval-test--screen-corpus
                   "examples/bulk-en-corpus.sexp"))))
+
+(ert-deftest bulk-policy-eval-test-routed-conflict-is-caught-and-falls-back ()
+  "The rival screen protects a routed question end to end.
+
+Every other contradiction in the corpora is a `conflict' question, which the
+policy refuses at admission, so the screen never had to act on a case the
+policy actually delegates.  `routed-conflict' is an ordinary factual question
+whose two maintenance records happen to disagree about a tank capacity:
+nothing in the question signals a conflict, a host classifies it `fact', and
+the policy admits it.  The screen is then the only thing between a silently
+resolved disagreement and a final answer."
+  (let* ((report (nl-agent-bulk-policy-eval-test--stub-report))
+         (case (cl-find "routed-conflict" (plist-get report :cases)
+                        :key (lambda (entry) (plist-get entry :id)) :test #'equal))
+         (arm (nl-agent-bulk-policy-eval-test--arm case 'policy-exercise)))
+    (should case)
+    (should (eq 'fact (plist-get case :kind)))
+    (should (eq 'admitted (plist-get (plist-get arm :decision) :reason)))
+    (should (cl-some (lambda (d) (and (eq (plist-get d :code) 'unreported-rival-value)
+                                      (eq (plist-get d :severity) 'reject)))
+                     (plist-get arm :diagnostics)))
+    (should (eq 'reject (plist-get arm :disposition)))
+    (should (plist-get (plist-get arm :fallback) :used))
+    (should (eq 'direct (plist-get (plist-get arm :final) :path)))))
 
 (ert-deftest bulk-policy-eval-test-worker-timeout-override ()
   "The worker timeout defaults to the shipped value and validates overrides.

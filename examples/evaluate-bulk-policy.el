@@ -74,6 +74,10 @@
     ("absent-field" . absence)
     ("conflicting-sources" . conflict)
     ("quoted-instruction-embedded" . quoted-instruction)
+    ;; Routed, not excluded: the question names no conflict, so the policy
+    ;; admits it and the rival screen is the only thing between a silently
+    ;; resolved disagreement and a final answer.
+    ("routed-conflict" . fact)
     ;; The excluded-kind corpus.  Both kinds are refused delegation by default,
     ;; so these cases exist to judge that refusal on more than two examples.
     ("conflict-unresolvable" . conflict)
