@@ -405,6 +405,164 @@ two narrower statements:
 
 The default policy therefore stays `direct-only`, and delegation stays opt-in.
 
+## Worker comparison, 2026-09-19 (hermes3:8b)
+
+The artifact is
+`target/bulk-policy/live-worker-hermes3-8b-20260919-184513/report.sexp`, with
+the measured source hashes and the worker's quantisation in the adjacent
+`implementation.sha256`. Wall clock 215.6 seconds.
+
+Setup: main `llama3.1:8b` Q4_K_M unchanged; the worker was `hermes3:8b`
+instead of `llama3.2:3b`. Two caveats bound what this run can mean.
+`hermes3:8b` is quantised **Q4_0** where the baseline worker is Q4_K_M, so any
+difference confounds model and quantisation. And at 8B it is the same size as
+the main model, so this is not a cheap-worker configuration: it bounds what a
+*stronger* worker does, not what a cheaper one costs.
+
+This run is after the kind exclusion landed, so the comparison below is over
+the six cases the default policy actually routes. The three excluded cases
+still carry data in the artifact, because the raw delegated arm is independent
+of the policy; they are reported separately as reference and are not shipped
+behaviour.
+
+### Worker answer quality on the six routed cases
+
+| Case | `llama3.2:3b` | `hermes3:8b` |
+| --- | --- | --- |
+| short-factual | pass | pass |
+| distractor-tail | pass | pass |
+| multi-file-negation | fail, dropped the June 18 date | **pass**, both facts |
+| absent-answer | fail, substituted the general number | fail, same substitution |
+| multi-fact | pass | pass |
+| absent-field | pass | pass |
+
+Four of six against five of six. The stronger worker is better at the answer.
+
+### The end-to-end outcome got worse, and why
+
+On `absent-answer` the delegated answer was wrong in both runs, but only the
+baseline was caught:
+
+- `llama3.2:3b` cited `absent-answer.txt` lines 3-4, which include
+  「携帯電話番号はこの資料には記載されていません。」 →
+  `absence-marker-conflict` fired → rejected → fell back to direct → the
+  final answer was correct.
+- `hermes3:8b` cited line 3 only, 「代表電話は 06-1234-5678 です。」 → no
+  absence marker appears in the cited excerpt → no diagnostic → accepted for
+  review → **the wrong answer is the final answer**.
+
+The stronger worker evaded the screen by citing more narrowly. The same
+mechanism produced false positives in the other direction:
+
+- `hermes3:8b` answered `multi-file-negation` correctly with both facts but
+  cited only `multi-file/project.txt` line 2, so `partial-source-coverage`
+  rejected a correct answer and paid for a fallback.
+- A correct absence answer necessarily cites the line stating the absence, so
+  `absence-marker-conflict` fires on `absent-field` in both runs.
+
+**These diagnostics screen citation shape, not answer quality**, and citation
+shape correlates imperfectly with quality in both directions. One concrete
+improvement follows from the failure above and is *not* implemented: the host
+holds the full source snapshot, so an absence-marker check could scan the
+requested sources rather than only the excerpts the worker chose to cite.
+That would have caught this run's miss. Until it exists, a narrower citation
+is a way past the screen.
+
+### The worker model does not change the byte economics
+
+| Measure | `llama3.2:3b` | `hermes3:8b` |
+| --- | ---: | ---: |
+| Direct main input | 15,178 | 15,178 |
+| Delegated main input | 9,540 | 9,308 |
+| Worker input | 21,964 | 21,964 |
+| Combined input | 31,504 (+107.6%) | 31,272 (+106.0%) |
+
+Worker input is identical because the prompts are identical; only the answer
+lengths differ. Swapping the worker does not move the total-work result.
+
+Arm-level counts are **not** comparable between the two runs, because the
+policy changed between them: the baseline predates the kind exclusion and
+admitted all nine cases, while this run admits six.
+
+### Reference: the three excluded cases
+
+Not shipped behaviour, recorded because it bears on whether the exclusion
+should ever be narrowed. `hermes3:8b` answered both excluded shapes correctly
+where `llama3.2:3b` failed them: it reported the conflict with both dates and
+both revisions, and it said the embedded instruction must not be executed.
+That is two synthetic cases in one run. It is a reason to revisit the
+exclusion with a designed experiment, not a reason to narrow it now.
+
+## Worker comparison, 2026-09-19 (qwen3:4b)
+
+The artifact is
+`target/bulk-policy/live-worker-qwen3-4b-20260919-184513/report.sexp`. Same
+main model and settings; only the worker selector changed. Wall clock 459.2
+seconds, more than twice the other two runs.
+
+`qwen3:4b` is the size class the experiment is actually about — a cheap worker
+beside an 8B main — but **as configured it is unusable in this harness**.
+
+### Seven of nine worker calls returned empty content
+
+| Case | Worker | Output bytes | Worker seconds |
+| --- | --- | ---: | ---: |
+| short-factual | usable | 118 | 25.7 |
+| distractor-tail | failed | 0 | 50.0 |
+| multi-file-negation | usable | 240 | 42.0 |
+| absent-answer | failed | 0 | 45.2 |
+| multi-fact | failed | 0 | 42.3 |
+| absent-field | failed | 0 | 43.2 |
+| quoted-instruction, conflicting-sources, quoted-instruction-embedded | failed | 0 | 42–44 |
+
+Zero content bytes after 42 to 50 seconds, then a schema failure on the empty
+string. The host recorded `bulk-reader-failure`; the reader sanitises provider
+detail, so the report does not say more.
+
+The likely cause is that the model's reasoning output consumed the 1024-token
+worker budget and the message content came back empty, which JSON mode does
+not prevent. **This was not tested.** Raising the output cap, disabling
+reasoning output, or inspecting the raw provider response would settle it, and
+none of that was done here. Nothing in this run licenses a claim about the
+model's capability: it is a statement about this model under these settings
+(1024-token cap, JSON mode, 60-second timeout).
+
+### The two usable answers were correct, and the fallback absorbed the rest
+
+Of the six routed cases, two produced a usable worker result and both answers
+were correct. The other four failed at the worker, `worker-failed` fired on
+each, and all four fell back to the direct read — **every final answer in the
+run was correct**. The policy behaved as designed under a worker that mostly
+did not work, which is the useful result here.
+
+The price is visible in the accounting rather than hidden: the
+`distractor-tail` case spent 22,268 request bytes in the exercise arm, being
+11,550 for the failed worker plus 10,718 for the direct fallback, against
+10,718 for the direct arm alone. A failed delegation costs the whole
+delegation plus the whole direct read, and four of six routed cases paid that.
+
+Cross-model byte totals cannot be read off this run's paired fields, because
+only two cases paired. The per-case worker input is identical to the other two
+runs (the prompts are identical), so the byte conclusion from the baseline
+still stands.
+
+### What the three runs together support
+
+Worker answer quality on the six routed cases: `llama3.2:3b` four of six,
+`hermes3:8b` five of six, `qwen3:4b` two usable of six with four technical
+failures. The stronger worker answers better; the cheapest worker tested did
+not return usable output at all under these settings.
+
+None of the three changes the total-work result: combined input stays roughly
+twice direct, because it is set by the prompts rather than by the worker.
+The case for delegation therefore still rests on main-context reduction, not
+on total cost.
+
+The bounded fallback earned its place in all three runs. It converted every
+technical failure and every caught quality failure into a correct final
+answer. What it cannot do is catch a wrong answer that cites narrowly, as
+`hermes3:8b` showed.
+
 ## Not measured
 
 Token counts, billing and energy use are `unavailable`: the provider does not
@@ -421,7 +579,13 @@ The policy arms replay results already obtained for the case, so their
 elapsed figures are not independent latency measurements of the arms.
 
 Nothing here establishes a production routing threshold, a cloud cost saving,
-or a general ranking of models. The corpus is nine synthetic cases run once.
-A worker-model comparison against `hermes3:8b` and `qwen3:4b` is a separate
-run; note that `hermes3:8b` is quantised Q4_0, not Q4_K_M, so a difference
-observed against it would confound model and quantisation.
+or a general ranking of models. The corpus is nine synthetic cases run once
+per worker.
+
+The worker comparisons above carry their own limits. `hermes3:8b` is quantised
+Q4_0 against the baseline worker's Q4_K_M, so a difference observed against it
+confounds model and quantisation, and at 8B it is not a cheap worker. The
+`qwen3:4b` failures were not diagnosed: the cause of the empty responses is a
+hypothesis, and the run says nothing about that model under different output
+limits or with reasoning output disabled. No run was repeated, so none of the
+three supports a latency comparison either.
