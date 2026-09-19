@@ -736,6 +736,67 @@ technical failure and every caught quality failure into a correct final
 answer. What it cannot do is catch a wrong answer that cites narrowly, as
 `hermes3:8b` showed.
 
+## Re-measurement at the 4096 budget, 2026-09-19
+
+Artifacts: `target/bulk-policy/live-4096-<worker>-20260919-210109/`, each with
+an `implementation.sha256` naming the commit and the worker's quantisation.
+Three workers, same main model and corpus, the only change being the raised
+default output budget and the diagnostics landed since. The baseline worker was
+included precisely to check the assumption that the budget cannot matter to a
+model that does not think first.
+
+### Raising the budget alone does not rescue `qwen3:4b`
+
+At 1024 it failed seven of nine calls by truncation. At 4096 it succeeds on
+four and fails five — and **every one of those five failures took exactly
+60.0 seconds**, the worker timeout, with no output at all. The failure mode
+moved from truncation to timeout; the budget was necessary and not sufficient.
+Its successful calls took 21.5 to 55.3 seconds, so the 60-second limit is
+marginal for this model rather than comfortably clear.
+
+The four answers it did return were **all correct**, including
+`multi-file-negation` with both facts and no diagnostic raised. A 4B worker
+can do this work when it is given room to finish; on this host it usually is
+not. Of the six cases the default policy routes, four were usable and correct
+and two timed out, fell back, and ended on correct direct answers.
+
+Note that a timeout is reported as `bulk-reader-failure`, not
+`empty-provider-output`: no response arrives at all, so there is no empty
+content to name. The two codes separate cleanly, which is what they are for.
+
+### The budget changed nothing for the other two workers
+
+`hermes3:8b` produced **byte-identical output on all nine cases** at both
+budgets — 152, 229, 202, 224, 513, 194, 246, 340 and 261 bytes — so it never
+approached the old cap. `llama3.2:3b` answered all nine usably, and reproduced
+both of its recorded quality failures: it dropped the June 18 date on
+`multi-file-negation` and substituted the general telephone number on
+`absent-answer`. Combined input came to 31,502 bytes against the 31,504
+recorded earlier. The recorded findings survive the change.
+
+### The diagnostic fixes show up in a live run
+
+| Worker | Rejections | Diagnostics |
+| --- | ---: | --- |
+| `hermes3:8b` | 1 | `uncited-absence-marker` 1, `uncited-source-used` 1 |
+| `llama3.2:3b` | 2 | `absence-marker-conflict` 1, `partial-source-coverage` 1 |
+| `qwen3:4b` | 2 | `worker-failed` 2 |
+
+`hermes3:8b` now takes one rejection where it previously took two: its correct
+two-fact answer is a `uncited-source-used` note instead of a coverage
+rejection, while its wrong absence answer is still caught. `llama3.2:3b` keeps
+both of its rejections, because both of its answers really are wrong, and its
+correct `absent-field` answer is no longer rejected. Both fixes behave in a
+live run as they did in replay.
+
+### What this does not settle
+
+The 60-second worker timeout is now the binding constraint for a reasoning
+model, and it was not changed here, so nothing above says what `qwen3:4b`
+would do with more time. Raising it trades wall-clock against failure rate and
+that has not been measured. Combined-input totals for `qwen3:4b` cover only
+the four paired cases and are not comparable with the other two runs.
+
 ## Not measured
 
 Token counts, billing and energy use are `unavailable`: the provider does not
@@ -758,13 +819,14 @@ per worker.
 The worker comparisons above carry their own limits. `hermes3:8b` is quantised
 Q4_0 against the baseline worker's Q4_K_M, so a difference observed against it
 confounds model and quantisation, and at 8B it is not a cheap worker. The
-`qwen3:4b` empty responses have since been diagnosed as output-budget
-exhaustion, but that model was never re-run through the harness at the larger
-budget, so **its quality on this corpus is unmeasured** — one direct probe on
-one case is not a comparison. No run was repeated, so none of the three
-supports a latency comparison either.
+`qwen3:4b` empty responses were diagnosed as output-budget exhaustion and the
+re-measurement above covers the larger budget, so that gap is closed. What
+remains open there is the timeout: five of its nine calls now end at exactly
+the 60-second limit, and no run has been made with a longer one. No run was
+repeated, so none of these supports a latency comparison either.
 
-The raised default budget and the recorded runs do not match: every run above
-used 1024. A run at 4096 would change the worker's failure rate and, through
-that, the fallback count and the input totals. Nothing above has been
-re-measured against the new default.
+The two worker comparison sections above were measured at the 1024 budget and
+with the earlier diagnostics. Their quality findings were reproduced at 4096,
+but their arm counts and input totals were not: read those numbers as
+belonging to the configuration named in each section, not to the current
+default.
