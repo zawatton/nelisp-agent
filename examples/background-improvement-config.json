@@ -1,0 +1,24 @@
+{
+  "format": "nl-agent-improvement-v1",
+  "catalog": "../state/background/models/catalog.json",
+  "queueState": "../state/background/improvement-queue.sexp",
+  "providerId": "native",
+  "providerName": "Background-trained NeLisp models",
+  "idPrefix": "self",
+  "grammar": {"type": "message", "length": 128},
+  "benchmark": {
+    "examples": ["```elisp\n(message \"task complete\")\n```"]
+  },
+  "model": {
+    "source": "latest-or-new", "dim": 24, "ff": 48,
+    "blocks": 2, "heads": 2, "maxParameters": 1000000
+  },
+  "training": {
+    "execution": "background", "backend": "gpu",
+    "sequence": 256, "optimizer": "adam"
+  },
+  "minDelta": 0.0,
+  "maxSequence": 1024,
+  "maxPending": 32,
+  "maxHistory": 256
+}

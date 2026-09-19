@@ -1,0 +1,37 @@
+{
+  "format": "nl-agent-improvement-v1",
+  "catalog": "../state/models/catalog.json",
+  "queueState": "../state/improvement-queue.sexp",
+  "providerId": "native",
+  "providerName": "Self-evolved NeLisp models",
+  "idPrefix": "self",
+  "artifactName": "NeLisp self-evolved generation",
+  "grammar": {
+    "type": "message",
+    "length": 128
+  },
+  "benchmark": {
+    "examples": [
+      "```elisp\n(message \"task complete\")\n```"
+    ]
+  },
+  "model": {
+    "source": "latest-or-new",
+    "dim": 24,
+    "ff": 48,
+    "blocks": 2,
+    "heads": 2,
+    "maxParameters": 1000000
+  },
+  "training": {
+    "backend": "gpu",
+    "sequence": 256,
+    "optimizer": "sgd",
+    "checkpointDirectory": "../state/training-checkpoints",
+    "checkpointEvery": 50
+  },
+  "minDelta": 0.0,
+  "maxSequence": 1024,
+  "maxPending": 32,
+  "maxHistory": 256
+}

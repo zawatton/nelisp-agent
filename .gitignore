@@ -1,0 +1,6 @@
+*.elc
+*~
+/.serena/
+/target/
+/session.checkpoint
+/state/

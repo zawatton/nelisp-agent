@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+agent_bin_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+agent_project_root=$(dirname -- "$agent_bin_dir")
+agent_emacs=${NELISP_AGENT_EMACS:-emacs}
+
+exec "$agent_emacs" -Q --batch \
+  -L "$agent_project_root/lisp" \
+  -L "$agent_project_root/../nelisp-llm/lisp" \
+  -L "$agent_project_root/../nelisp-photon/lisp" \
+  -l "$agent_project_root/lisp/nl-agent-cli.el" \
+  -f nl-agent-cli-main -- "$@"

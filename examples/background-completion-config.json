@@ -1,0 +1,22 @@
+{
+  "format": "nl-agent-improvement-v1",
+  "catalog": "../state/background-completion/models/catalog.json",
+  "queueState": "../state/background-completion/improvement-queue.sexp",
+  "providerId": "native",
+  "providerName": "Completion-trained NeLisp models",
+  "idPrefix": "self",
+  "grammar": {"type": "message", "length": 128},
+  "benchmark": {"examples": ["DONE task complete"]},
+  "model": {
+    "source": "latest-or-new", "dim": 24, "ff": 48,
+    "blocks": 2, "heads": 2, "maxParameters": 1000000
+  },
+  "training": {
+    "objective": "completion", "execution": "background",
+    "backend": "cpu", "sequence": 256, "optimizer": "sgd"
+  },
+  "minDelta": 0.0,
+  "maxSequence": 1024,
+  "maxPending": 32,
+  "maxHistory": 256
+}

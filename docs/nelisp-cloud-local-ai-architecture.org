@@ -1,0 +1,585 @@
+#+TITLE: NeLisp Cloud-Local AI Architecture Design
+#+SUBTITLE: Semantic IR for Token-Efficient Hybrid AI Execution
+#+AUTHOR: NeLisp Project
+#+DATE: 2026-09-19
+#+OPTIONS: toc:3 num:t
+
+* 1. Overview
+
+NeLisp SHALL serve as a Semantic IR / Agent IR between high-capability cloud reasoning models and lightweight local models or deterministic executors.
+
+Core principle:
+
+#+begin_quote
+Cloud intelligence decides meaning. NeLisp carries intent. Local executors realize the result.
+#+end_quote
+
+The objective is not merely to reduce tokens, but to minimize total cost per validated result while preserving quality, privacy, and portability.
+
+* 2. Goals
+
+- Minimize cloud output-token consumption.
+- Separate reasoning from presentation and execution.
+- Permit small local LLMs to handle constrained language generation.
+- Prefer deterministic tools whenever deterministic execution is possible.
+- Support documents, spreadsheets, code, filesystems, and images.
+- Validate results locally and return compact diagnostics for repair.
+- Route tasks according to intelligence, privacy, latency, and hardware budgets.
+- Keep the protocol model- and vendor-independent.
+
+* 3. Architecture
+
+#+begin_src text
+User
+  |
+  v
+Cloud Reasoner
+  |
+  | NeLisp Semantic IR
+  v
+Local Runtime / Router
+  |
+  +--> Local LLM ----------> prose / translation / summarization
+  +--> Document Executor --> DOCX / PDF / PPTX / XLSX
+  +--> Code Executor ------> edits / formatter / compiler / tests
+  +--> Image Executor -----> image model / image processing
+  +--> System Tools -------> filesystem / conversion / arithmetic
+  |
+  v
+Validator
+  |
+  +--> success --> Result
+  +--> failure --> compact diagnostic --> Cloud Reasoner
+#+end_src
+
+The cloud model SHOULD emit the minimum representation necessary to preserve semantic intent and execution constraints.
+
+* 4. NeLisp as Semantic IR
+
+NeLisp is not merely serialization. It represents intended semantics.
+
+#+begin_src lisp
+(response
+  :kind technical-explanation
+  :language ja
+  (claims
+    (claim :id rpr-1 :text "RPR detects reverse active power.")
+    (claim :id rpr-2 :text "Voltage-current phase affects detection."))
+  (presentation
+    :detail medium
+    :audience beginner
+    :allow-new-claims false))
+#+end_src
+
+A local renderer can transform this into prose without independently solving the original engineering problem.
+
+** 4.1 Required IR Properties
+
+- Explicit: important facts and constraints are directly represented.
+- Compact: redundant prose is avoided.
+- Typed: task kinds and values are identifiable.
+- Validatable: constraints are machine-checkable.
+- Composable: plans can contain nested operations.
+- Model-independent: no dependency on one LLM provider.
+- Executor-independent: several implementations can consume the same intent.
+- Loss-aware: missing execution information can be detected.
+
+* 5. Components
+
+** 5.1 Cloud Reasoner
+
+Responsible for complex reasoning, ambiguous requirement interpretation, planning, architecture, difficult coding decisions, semantic revision, and cross-domain synthesis.
+
+It SHOULD avoid producing large final-form outputs when compact IR is sufficient.
+
+** 5.2 Local Runtime and Router
+
+The runtime parses and validates NeLisp, selects executors, manages permissions/resources, passes minimal context, captures results, and invokes validation.
+
+Routing SHOULD be deterministic where possible.
+
+** 5.3 Local LLM
+
+The local LLM primarily performs transformation, not original reasoning:
+
+- IR -> natural-language prose.
+- Translation.
+- Tone transformation.
+- Structured points -> paragraphs.
+- Constrained summarization/expansion.
+- Markdown/Org presentation.
+- Simple classification where rules are insufficient.
+
+When =:allow-new-claims false= is set, it MUST NOT intentionally introduce new factual claims.
+
+** 5.4 Deterministic Executors
+
+Prefer deterministic software over LLMs for deterministic tasks.
+
+| Operation | Preferred executor |
+|-----------+--------------------|
+| DOCX structural edit | document library |
+| XLSX formulas/styles | spreadsheet library |
+| PDF merge | PDF engine |
+| source formatting | formatter |
+| compilation | compiler |
+| file movement | filesystem |
+| resize/crop | image library |
+| arithmetic | numeric runtime |
+
+** 5.5 Image Executor
+
+Text reasoning and pixel execution are separate concerns.
+
+#+begin_src lisp
+(image-edit
+  :source "portrait.png"
+  (preserve (subject person) (identity true) (pose true))
+  (replace
+    (region background)
+    (scene :location "Tokyo" :time night :style photorealistic))
+  (constraints :preserve-resolution true))
+#+end_src
+
+The router may select deterministic image processing, segmentation, or a generative image model.
+
+** 5.6 Validator
+
+Validation SHOULD occur locally whenever success criteria are machine-checkable:
+
+- Page count.
+- Required headings.
+- Spreadsheet formulas.
+- File readability.
+- Compilation and tests.
+- Image dimensions.
+- Preservation of mandatory semantic claims.
+
+#+begin_src lisp
+(validation-failure
+  :task task-001
+  :constraint max-pages
+  :expected 3
+  :actual 4
+  (diagnostic
+    :section "Project Details"
+    :estimated-overflow-lines 14))
+#+end_src
+
+Only the compact diagnostic needs to return to the cloud.
+
+* 6. Intelligence Budget
+
+Intelligence SHALL be treated as an allocatable resource.
+
+#+begin_src lisp
+(task
+  :intelligence cloud-high
+  (reason :level high)
+  (render
+    :intelligence local-low
+    :model-class 3b
+    :creativity low
+    :allow-inference false))
+#+end_src
+
+| Level | Execution | Typical use |
+|-------+-----------+-------------|
+| 0 | deterministic | formatting, arithmetic, file operations |
+| 1 | local-small | rendering, translation, classification |
+| 2 | local-medium | constrained interpretation, local coding |
+| 3 | cloud-standard | general reasoning |
+| 4 | cloud-frontier | complex reasoning and planning |
+
+These are logical capability classes, not fixed parameter counts.
+
+* 7. Local Model Size Strategy
+
+A local model does not need to rediscover reasoning already performed in the cloud.
+
+| Model class | Expected role |
+|-------------+---------------|
+| 0.5B--1.5B | templates and simple transformation |
+| 2B--4B | primary IR-to-text renderer |
+| 7B--8B | better prose and limited local judgment |
+| 14B | meaningful local reasoning |
+| 30B+ | usually overlaps with the cloud reasoning role |
+
+A 3B--4B model is the recommended initial experimental target.
+
+Evaluation SHOULD measure instruction following, faithfulness, NeLisp comprehension, Japanese quality, context length, latency, memory use, quantization tolerance, and hallucination rate.
+
+* 8. IR Richness vs Local Intelligence
+
+The weaker the local model, the richer and more explicit the Semantic IR SHOULD be.
+
+Poor IR:
+
+#+begin_src lisp
+(explain "NeLisp" "cloud reasoning" "local output" "token savings")
+#+end_src
+
+Richer IR:
+
+#+begin_src lisp
+(section
+  :title "NeLisp as an Intermediate Representation"
+  (thesis "NeLisp connects cloud reasoning with local execution.")
+  (points
+    (point
+      :claim "The cloud model focuses on difficult reasoning."
+      :explanation "Natural-language rendering is delegated locally.")
+    (point
+      :claim "Cloud output-token usage can be reduced."
+      :explanation "The cloud emits compact IR instead of full prose."))
+  (style
+    :language ja
+    :tone technical
+    :detail medium
+    :allow-new-claims false))
+#+end_src
+
+This turns the local model from a reasoner into a constrained renderer.
+
+* 9. Token-Efficiency Model
+
+Illustrative conventional interaction:
+
+#+begin_src text
+Cloud input:   3,000 tokens
+Cloud output:  6,000 tokens
+Cloud total:   9,000 tokens
+#+end_src
+
+Illustrative Semantic IR interaction:
+
+#+begin_src text
+Cloud input:   3,000 tokens
+Cloud IR:        800 tokens
+Cloud total:   3,800 tokens
+
+Local input:     800 tokens
+Local output:  6,000 tokens
+#+end_src
+
+Savings are not guaranteed. Economics depend on provider pricing, prompt caching, IR verbosity, repair loops, local energy/hardware cost, and quality requirements. The optimization target is total cost per validated result.
+
+* 10. Document Editing
+
+#+begin_src text
+DOCX -> local structural extraction -> Cloud Reasoner -> NeLisp edit plan
+     -> local document executor -> render -> local validation
+     -> success OR compact repair diagnostic
+#+end_src
+
+#+begin_src lisp
+(edit-document
+  :source "report.docx"
+  (delete (section "Background") (paragraph 4))
+  (rewrite (paragraph 7) :goal concise :max-chars 250)
+  (rename-heading
+    :from "Background of Project Implementation"
+    :to "Background and Issues")
+  (format (heading-level 1) :bold true :size 16)
+  (constraints :max-pages 3))
+#+end_src
+
+* 11. Spreadsheet Editing
+
+Spreadsheet operations frequently need no local LLM.
+
+#+begin_src lisp
+(workbook-edit
+  :source "sales.xlsx"
+  (sheet "Sales"
+    (set-formula "G20" "=SUM(G5:G19)")
+    (format-range "A1:G1" :bold true)
+    (autofit "A:G")))
+#+end_src
+
+The local LLM is introduced only where semantic interpretation is required.
+
+* 12. Image Editing
+
+#+begin_src text
+User instruction + image
+        -> Cloud Reasoner
+        -> NeLisp Image IR
+        -> Local Router
+        -> deterministic image tool OR generative image model
+        -> Validator
+#+end_src
+
+Simple operations SHOULD remain deterministic. Generative edits SHOULD use specialized image models rather than a text LLM.
+
+* 13. Code and Repository Editing
+
+#+begin_src lisp
+(repository-edit
+  :goal "Add Semantic IR validation"
+  (modify "src/ir/parser.nl"
+    (require :behavior "reject unknown mandatory fields"))
+  (add-tests
+    :target "tests/ir/parser-tests.nl"
+    :cases (unknown-field malformed-type missing-required-field))
+  (validate (run-tests true) (formatter true)))
+#+end_src
+
+The cloud decides the semantic change; local tools edit, format, compile, and test where feasible.
+
+* 14. Failure and Repair Protocol
+
+Full artifacts SHOULD NOT automatically return to the cloud after every failure.
+
+#+begin_src lisp
+(repair-request
+  :task task-001
+  :attempt 1
+  (failure
+    :type constraint-violation
+    :constraint max-pages
+    :expected 3
+    :actual 4)
+  (context
+    :overflow-section "Implementation Plan"
+    :estimated-reduction 420
+    :unit characters))
+#+end_src
+
+The cloud responds with a patch rather than a complete regeneration.
+
+#+begin_src lisp
+(plan-patch
+  :task task-001
+  (rewrite
+    (section "Implementation Plan")
+    :reduce-chars 450
+    :preserve-claims true))
+#+end_src
+
+* 15. Privacy and Security
+
+The runtime SHOULD support explicit data-locality policy.
+
+#+begin_src lisp
+(task
+  :privacy local-preferred
+  (cloud-policy
+    :send-full-document false
+    :send-selected-sections true
+    :send-sensitive-fields false))
+#+end_src
+
+Suggested modes:
+
+- =cloud-allowed=
+- =local-preferred=
+- =local-only=
+- =redacted-cloud=
+
+Executors MUST be permission-scoped. Filesystem, shell, network, repository writes, and destructive operations SHOULD have independently enforceable capabilities.
+
+* 16. Proposed Runtime Pipeline
+
+#+begin_src text
+1. Parse user intent.
+2. Determine whether local deterministic execution is sufficient.
+3. If reasoning is needed, select intelligence tier.
+4. Obtain NeLisp plan from selected reasoner.
+5. Validate IR schema.
+6. Route each operation to the least expensive sufficient executor.
+7. Execute locally where possible.
+8. Validate result.
+9. If valid, return result.
+10. If invalid, construct minimal repair request.
+11. Escalate only the missing reasoning to a stronger model.
+12. Apply patch and revalidate.
+#+end_src
+
+* 17. Model Escalation
+
+The runtime SHOULD support progressive escalation rather than selecting the strongest model by default.
+
+#+begin_src text
+Deterministic executor
+       |
+       | insufficient
+       v
+Local small model
+       |
+       | insufficient
+       v
+Local medium model
+       |
+       | insufficient
+       v
+Cloud model
+       |
+       | exceptional complexity
+       v
+Cloud frontier/high-reasoning model
+#+end_src
+
+Escalation signals can include validation failure, low confidence, unsupported operation, missing context, repeated repair failure, or explicit policy.
+
+* 18. Benchmark Plan
+
+The initial PoC SHOULD compare at least 1B, 3B/4B, and 7B/8B local models using identical NeLisp IR.
+
+Measure:
+
+- Semantic preservation rate.
+- Hallucination/new-claim rate.
+- Constraint compliance.
+- Japanese prose quality.
+- Cloud tokens consumed.
+- End-to-end latency.
+- Peak RAM/VRAM.
+- Energy estimate where available.
+- Repair-loop frequency.
+- Total cost per validated result.
+
+Benchmark suites SHOULD include:
+
+1. IR -> Japanese technical prose.
+2. IR -> concise business prose.
+3. Translation preserving facts.
+4. DOCX edit-plan execution.
+5. XLSX deterministic editing.
+6. Code patch + test validation.
+7. Image-edit routing.
+8. Failure/repair cycles.
+
+* 19. Design Hypotheses
+
+The project should test rather than assume:
+
+- H1: A 3B--4B local model is sufficient for high-quality constrained rendering when IR is rich.
+- H2: Rich Semantic IR reduces quality variance between small and large local models.
+- H3: Deterministic executors eliminate a substantial fraction of LLM calls in agent workflows.
+- H4: Local validation plus patch-based repair materially reduces cloud token use.
+- H5: The optimal IR balances compactness against intelligence demanded from the local renderer.
+
+* 20. Proposed NeLisp Concepts
+
+#+begin_src lisp
+(task
+  :id task-42
+  :intelligence local-low
+  :privacy local-preferred
+  :latency interactive
+  :cost-budget low
+
+  (input ...)
+  (plan ...)
+  (constraints ...)
+  (executor :class document)
+  (validate ...)
+  (on-failure
+    (escalate :to cloud-standard
+              :context minimal)))
+#+end_src
+
+Candidate first-class concepts:
+
+- =task=
+- =plan=
+- =claim=
+- =constraint=
+- =executor=
+- =validate=
+- =repair-request=
+- =plan-patch=
+- =intelligence=
+- =privacy=
+- =cost-budget=
+- =latency=
+- =allow-inference=
+
+* 21. Implementation Roadmap
+
+** Phase 1: Semantic IR PoC
+
+- Define minimal task/plan/claim/constraint grammar.
+- Implement parser and schema validation.
+- Implement IR -> text renderer adapter.
+- Benchmark 1B, 3B/4B, and 7B/8B models.
+
+** Phase 2: Deterministic Executors
+
+- Filesystem executor.
+- Markdown/Org executor.
+- DOCX executor.
+- XLSX executor.
+- Code formatter/test executor.
+
+** Phase 3: Validation and Repair
+
+- Standard validation-result schema.
+- Compact repair-request schema.
+- Patch application.
+- Retry/escalation policy.
+
+** Phase 4: Multimodal Execution
+
+- Image executor abstraction.
+- Deterministic image operations.
+- Generative image backend.
+- Image constraints and validation.
+
+** Phase 5: Runtime Optimization
+
+- Intelligence-budget routing.
+- Cost-aware routing.
+- Privacy-aware routing.
+- Model capability registry.
+- Local/cloud telemetry and benchmarking.
+
+* 22. Architectural Positioning
+
+NeLisp should not be positioned merely as Lisp syntax convenient for AI.
+
+A stronger role is:
+
+#+begin_quote
+NeLisp is a semantic execution language connecting cloud intelligence to local models, tools, and compute.
+#+end_quote
+
+A compact expression is:
+
+#+begin_quote
+Frontier intelligence in the cloud; lightweight execution at the edge.
+#+end_quote
+
+The strategic distinction is that NeLisp carries machine-actionable intent rather than verbose conversational output.
+
+* 23. Conclusion
+
+The proposed architecture separates intelligence from execution.
+
+High-capability cloud models are reserved for decisions that genuinely require high-capability reasoning. Lightweight local LLMs render already-decided semantics into human-facing language. Deterministic tools perform operations that do not require probabilistic intelligence. Specialized local models handle modalities such as images. Validators close the loop and send only compact failure information back for repair.
+
+The intended flow is:
+
+#+begin_src text
+Cloud Reasoning
+      |
+      v
+NeLisp Semantic IR
+      |
+      v
+Local Runtime
+  /    |     \
+ LLM  Tools  Models
+  \    |     /
+      Result
+        |
+        v
+    Validation
+        |
+        +--> Done
+        |
+        +--> Minimal repair request --> Cloud
+#+end_src
+
+This gives NeLisp a broader role than a programming-language syntax: it can become the semantic protocol that allocates expensive intelligence only where it is required.

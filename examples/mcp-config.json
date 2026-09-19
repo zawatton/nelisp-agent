@@ -1,0 +1,14 @@
+{
+  "servers": [
+    {
+      "id": "example",
+      "command": ["replace-with-mcp-server", "--stdio"],
+      "directory": ".",
+      "environment": {
+        "SERVICE_TOKEN": "HOST_SERVICE_TOKEN"
+      },
+      "risk": "external",
+      "protocolVersion": "2026-07-28"
+    }
+  ]
+}

@@ -1,0 +1,533 @@
+#+TITLE: NeLisp Agent
+
+* Purpose
+
+NeLisp Agent is one outward-facing agent service with replaceable internal
+parts.  It is not a Hermes fork.  The project connects NeLisp's live extension
+model and =nelisp-llm='s training/evaluation path to a product boundary while
+keeping model providers, transports, and future tool/MCP runtimes decoupled.
+
+This repository now contains a tested service and supervision substrate.  It
+is not yet a feature-complete Hermes Agent competitor.
+
+* Semantic IR development
+
+The [[file:docs/nelisp-cloud-local-ai-architecture.org][cloud/local architecture proposal]] is maintained in this repository.
+NeLisp supplies the general language/runtime; NeLisp Agent owns the task IR,
+execution policy, executor integration, and result-validation protocol.
+
+The first [[file:docs/semantic-ir.md][Semantic IR milestone]] provides a host-side, data-only parser,
+strict schema validation, deterministic claim rendering, and compact
+character-limit diagnostics. Run =make test-semantic-ir= independently of
+model providers or runtime builds. The optional [[file:docs/semantic-render.md][local-model renderer]] reuses
+the provider interface and connects through the existing permission-checked
+host tool broker. Its output remains subject to semantic review.
+The renderer screens source-derived numeric tokens and keeps task/claim IDs
+out of the model prompt; these checks do not establish semantic correctness.
+The [[file:docs/semantic-evaluation.md][evaluation and repair guide]] defines a fixed Japanese corpus,
+literal screening, human review criteria, and opt-in bounded local retries.
+
+* Local HTTP facade
+
+=bin/nelisp-agent-http= is a localhost-only HTTP adapter for the persistent
+=--jsonl= service.  It requires a Bearer token in
+=NELISP_AGENT_HTTP_TOKEN=, forwards the existing JSONL request/response
+contract at =POST /v1/jsonl=, and provides unauthenticated =GET /health= for
+local process supervision.  Body size, worker timeout, and process request
+count are bounded.  See =docs/http-service.md=; this adapter is not an
+internet-facing deployment surface.
+
+* Runtime boundary
+
+#+begin_example
+client
+  |
+  +-- nl-agent-supervisor.el        process lifetime + checkpoint rotation
+        |
+        +-- nl-agent-host.el        inference + authoritative tool routing
+        |       |
+        |       +-- OpenAI-compatible model providers
+        |       +-- promoted nelisp-llm artifact provider
+        |       +-- evaluated nelisp-llm improvement queue
+        |       +-- permission policy + guarded local tools
+        |       +-- namespaced MCP clients and subprocesses
+        |       ^
+        |       | correlated inference/tool events and results
+        |       v
+        +-- standalone NeLisp worker (nl-agent-stdio.el)
+                |
+                +-- nl-agent-runtime.el
+                      CodeAct proposal -> tool -> observation loop
+                        |
+                        +-- nl-agent-service.el
+                        |     conversation + fallback + checkpoint
+                        |       |
+                        |       +-- nelisp-llm provider/session boundary
+                        |
+                        +-- model-visible broker tool registry
+#+end_example
+
+The service owns provider-neutral conversation history.  =nelisp-llm= owns
+model discovery, inference sessions, and transactional model switching.  A new
+backend must open before a switch commits; a failed switch leaves the previous
+model usable.
+
+The host owns HTTP, credentials, and OS process operations.  A broker event
+contains only model id, generation options, and provider-neutral messages.
+Credentials and backend objects never enter the standalone worker checkpoint.
+
+The worker owns the reasoning loop and trajectory.  A model can propose shell,
+exact SEARCH/REPLACE, Elisp, or a registered typed tool action, but cannot reach
+their implementation.  The host repeats authorization before invoking a real
+tool, so compromising the worker-side transport policy does not grant host
+authority.
+
+* Implemented behavior
+
+- =/models= lists public descriptors from every registered provider.
+- =/model PROVIDER/MODEL= switches without discarding conversation history.
+- Ordered fallback advances across open and completion failures.  Exhaustion
+  restores the original model when it can be reopened.
+- OpenAI-compatible and host-broker providers can be assembled from plist data.
+- A trained native model provider can share the same catalog without exposing
+  its model, checkpoint path, or grammar object.  Promoted =nelisp-llm=
+  checkpoints are discovered from a data-only catalog and loaded lazily after
+  SHA-256 verification.
+- Stdio input is parsed as data, never evaluated, and rejects trailing forms.
+- Broker inference uses correlated =inference-result= / =inference-error= forms.
+- The CodeAct parser is a public =nelisp-llm= API.  The runtime iterates model
+  proposal, permission-gated tool call, observation, and model revision until
+  =DONE= or a deterministic step limit.
+- Tool descriptors exclude invocation functions.  Risk-aware permission modes
+  support automatic read-only access, one-time or exact-call session approval,
+  an unoverrideable hard-deny floor, and fail-closed unattended execution.
+  Explicit self-evolution autonomy is recorded separately and cannot authorize
+  shell/edit/Elisp/MCP calls or a switch outside its own generation prefix.
+- Correlated tool events let standalone NeLisp retain reasoning state while the
+  host remains authoritative for approval and execution.
+- The worker obtains the public host model catalog at startup and refreshes it
+  before listing or switching models.  A newly promoted native generation
+  therefore becomes selectable without replacing the live worker.
+- The worker requests its model-visible tool catalog during startup, so local
+  and MCP capabilities can change without baking host configuration into the
+  standalone image.  The host returns descriptors and schemas, never call
+  functions.
+- MCP tools are namespaced as =mcp.SERVER.TOOL= and pass through the same risk
+  policy as local tools.  Server annotations are treated as untrusted metadata;
+  only the local configuration assigns risk.
+- The modern MCP stdio client implements the stateless 2026-07-28 protocol,
+  including per-request metadata, paginated =tools/list=, =tools/call=, bounded
+  frames/schemas, subprocess timeout, restricted environment inheritance, and
+  argument-free audit records.  Initialize-era MCP revisions are not yet
+  supported.
+- The standard host tools provide workspace-confined exact edits, approved
+  shell commands, and isolated batch-process Elisp.  Obvious destructive shell
+  operations and dangerous Elisp primitives are blocked before execution.
+- Every run returns a detached chronological trajectory containing model,
+  action, permission/tool result, and observation for audit or later curation.
+- An optional host-owned improvement queue publishes five typed tools: status,
+  submit, run, resume, and cancel.  A model may submit only bounded inert data for a
+  trusted allowlisted experiment kind; it cannot replace the trainer, evaluator,
+  publisher, or proposal callback.  Submit/cancel require write approval and
+  run/resume require execute approval under the normal host policy.  Pending and
+  terminal jobs persist atomically as private mode-0600 data; work interrupted
+  by a host crash remains audited and is never replayed automatically.
+- =service.model.switch= lets the model request activation of an available
+  generation.  The host resolves and approves the selector first; only then does
+  the worker refresh its catalog and perform the normal transactional switch.
+- Portable checkpoints contain model, options, fallback order, and messages.
+- The reference host supervisor checkpoints handled requests, persists them
+  atomically with mode 0600 when configured, rotates a worker at a request
+  limit, and restores after a worker or host restart.
+- Protocol, provider, fallback, checkpoint, and process failures are returned
+  or audited as structured data rather than silently changing live state.
+
+* Command-line service
+
+=bin/nelisp-agent= is the single user-facing facade.  It starts the supervised
+standalone NeLisp worker, connects the configured remote models, and keeps
+model networking and operating-system tools on the host side.
+
+An existing native artifact can also run without an external inference
+endpoint.  Select it explicitly with =--model= (or =NELISP_AGENT_MODEL=):
+
+#+begin_src sh
+bin/nelisp-agent --native-catalog state/models/catalog.json \
+  --model native/self-g1 --checkpoint state/session.checkpoint
+#+end_src
+
+The example requires an already-published artifact with that id; pretrained
+weights are not bundled.  Unset endpoint/API-key environment settings for
+native-only operation.  A restored session retains its saved model and history;
+use =/model= afterward to deliberately change the restored selection.  See
+[[file:docs/native-service.md][native-only startup and verification]] for the exact boundary and limitations.
+
+#+begin_src sh
+export NELISP_AGENT_BASE_URL="https://provider.example/v1"
+export PROVIDER_API_KEY="..."  # omit when the endpoint is anonymous
+
+bin/nelisp-agent \
+  --api-key-env PROVIDER_API_KEY \
+  --workspace ../project \
+  --checkpoint session.checkpoint
+#+end_src
+
+Plain interactive input runs an agent task.  =/chat TEXT= requests an ordinary
+completion; =/models=, =/model SELECTOR=, and =/status= operate on the same
+live service.  The prompt displays the exact tool and arguments before allowing
+=once=, =session=, or =deny=.  Use =--unattended= for cron or automation; it
+never prompts and denies any unscoped tool that would require approval.
+
+For explicit per-task recording, add =--trajectory-directory state/runs=
+(or =NELISP_AGENT_TRAJECTORY_DIRECTORY=).  This retains raw task/tool text for
+later inspection; it is disabled by default and may capture secrets.  Records
+are marked unverified, never automatically used as successful training
+examples.  A storage failure warns without replaying the task.  See
+[[file:docs/trajectory-capture.md][trajectory capture and training boundaries]].
+
+One-shot operation uses the same runtime and safety boundary:
+
+#+begin_src sh
+bin/nelisp-agent --base-url "$NELISP_AGENT_BASE_URL" \
+  --task "inspect the repository and fix the failing test"
+
+bin/nelisp-agent --base-url "$NELISP_AGENT_BASE_URL" \
+  --chat "summarize the current design"
+#+end_src
+
+A promoted native catalog can be attached alongside the remote provider.  The
+path may instead be supplied by =NELISP_AGENT_NATIVE_CATALOG=:
+
+#+begin_src sh
+bin/nelisp-agent --base-url "$NELISP_AGENT_BASE_URL" \
+  --native-catalog ../nelisp-llm/artifacts/catalog.json
+#+end_src
+
+The catalog is append-only under the supplied publisher: old immutable
+generations remain addressable, so a durable agent checkpoint can restore its
+exact selected model.  =/models= sees later catalog revisions, and
+=/model native/champion-gN= performs the ordinary transactional switch.
+
+Self-evolution can be assembled on the same command with one data-only file:
+
+#+begin_src sh
+bin/nelisp-agent --base-url "$NELISP_AGENT_BASE_URL" \
+  --improvement-config examples/improvement-config.json
+#+end_src
+
+This option creates the guarded improvement queue and attaches its dynamic
+native provider together; a separate =--native-catalog= is unnecessary for the
+same catalog.  Configuration-relative paths identify the immutable catalog and
+private queue checkpoint.  The fixed benchmark corpus, grammar, architecture,
+parameter budget, queue bounds, and artifact prefix are JSON data.  No callback
+or function name can be supplied.  On restart, =latest-or-new= verifies and
+loads the newest matching artifact as fresh trainable PAV parameters, restores
+the queue audit, and continues with the next generation number.
+
+The same profile selects the trusted training backend without exposing code:
+
+#+begin_src json
+"training": {
+  "backend": "gpu",
+  "sequence": 256,
+  "optimizer": "adam",
+  "checkpointDirectory": "../state/training-checkpoints",
+  "checkpointEvery": 50
+}
+#+end_src
+
+=cpu= remains the default.  With =gpu=, each transaction clones the current
+champion, uploads only that challenger into a dedicated compiled nlga graph,
+and keeps its weights and optimizer resident for every example and epoch.  With
+checkpointing disabled it reads the result back once before the fixed benchmark
+and immutable publication.  With bounded checkpointing enabled, it also reads
+back at each configured interval to atomically save private mode-0600 weights,
+Adam m/v tensors, optimizer step, and completed trajectory steps.  Trajectories
+longer than =sequence= are rejected before GPU allocation.  If no Vulkan device
+is available, the job records a training error and the champion remains
+unchanged.
+
+A crash still changes a running queue item to =interrupted=; it is never
+replayed automatically.  Interrupted work survives completed-history trimming,
+even when =maxHistory= is zero.  =maxPending= bounds all outstanding jobs
+(pending, running, or interrupted), so recovery cannot grow without limit.
+Cancel an interrupted job to release its slot; the host records cancellation
+before cleaning its recovery checkpoint.  A running job cannot be cancelled
+through this synchronous queue API.
+
+The separately approved =model.improvement.resume=
+tool accepts only a checkpoint bound to that exact job id, proposal digest,
+configuration digest, parent generation/score, optimizer, sequence, and total
+step count.  After terminal queue state is durable, the recovery checkpoint is
+deleted.  The checked-in test profile is deliberately tiny (528 parameters),
+so the full crash/restart path can be verified cheaply before scaling the same
+protocol to larger native models.
+
+Long-running self-evolution is an explicit additional authority:
+
+#+begin_src sh
+bin/nelisp-agent --base-url "$NELISP_AGENT_BASE_URL" \
+  --improvement-config examples/improvement-config.json \
+  --unattended --autonomous-improvement
+#+end_src
+
+This scope pre-authorizes only =model.improvement.submit/run/resume/cancel= and
+=service.model.switch= for the configured =PROVIDER/ID-PREFIX-gN= selector.
+Every grant is allow-once and audited as =autonomous-scope=.  Shell, file edits,
+Elisp, MCP calls, remote-model switching, malformed selectors, and hard-denied
+operations remain denied.  Without =--autonomous-improvement=, the original
+interactive/fail-closed behavior is unchanged.
+
+Run =bin/nelisp-agent --help= for all flags and interactive commands.  The
+endpoint remains explicit because free catalogs and access policies are owned
+by providers and may change independently of NeLisp Agent.
+
+** MCP tools
+
+Pass a data-only JSON file with =--mcp-config= or
+=NELISP_AGENT_MCP_CONFIG=.  =examples/mcp-config.json= is a template:
+
+#+begin_src json
+{
+  "servers": [
+    {
+      "id": "notes",
+      "command": ["notes-mcp-server", "--stdio"],
+      "directory": ".",
+      "environment": {"SERVICE_TOKEN": "HOST_SERVICE_TOKEN"},
+      "risk": "external",
+      "protocolVersion": "2026-07-28"
+    }
+  ]
+}
+#+end_src
+
+Then start the same service surface:
+
+#+begin_src sh
+export HOST_SERVICE_TOKEN="..."
+bin/nelisp-agent --base-url "$NELISP_AGENT_BASE_URL" \
+  --mcp-config examples/mcp-config.json
+#+end_src
+
+The environment object maps a variable name visible to the child to the name
+of an existing host variable.  Secret values therefore do not belong in the
+JSON file.  MCP subprocesses otherwise receive only a small allowlist of basic
+path, locale, temporary-directory, and Windows process variables.  Relative
+directories resolve from the configuration file.  Optional limits are
+=timeoutSec= and =maxFrameBytes=.
+
+A model invokes a published tool with non-evaluated Lisp data:
+
+#+begin_example
+```tool
+(:name "mcp.notes.search" :arguments (:query "transformer oil"))
+```
+#+end_example
+
+* Service API
+
+#+begin_src elisp
+(let* ((registry (nl-llm-agent-provider-registry-new))
+       ;; PROVIDER may be remote, brokered, or a local provider made by
+       ;; `nl-llm-agent-model-provider'.
+       (_ (nl-llm-agent-provider-register registry provider))
+       (service
+        (nl-agent-service-new
+         registry "provider/main-model"
+         :fallbacks '("provider/backup-model")
+         :system "You are NeLisp Agent.")))
+  (nl-agent-service-command service "/models")
+  (nl-agent-service-command service "hello")
+  (nl-agent-service-checkpoint service))
+#+end_src
+
+=examples/free-models-config.el= contains the initial snapshot supplied by the
+user.  Provider-controlled availability may change, so the endpoint is passed
+at runtime.  =:api-key-env= resolves credentials lazily and avoids embedding a
+secret in config.
+
+The supplied worker and host can be assembled without copying model state into
+the host:
+
+#+begin_src elisp
+(load "examples/free-models-host.el")
+(setq agent
+      (nl-agent-example-free-supervisor
+       "../nelisp/target/nelisp"
+       "https://provider.example/v1"
+       "PROVIDER_API_KEY"
+       "session.checkpoint"
+       (lambda (request)
+         (if (y-or-n-p
+              (format "Allow %s %S? "
+                      (plist-get request :tool)
+                      (plist-get request :args)))
+             'once
+           'deny))
+       default-directory))
+(nl-agent-supervisor-call agent '(chat "hello"))
+(nl-agent-supervisor-call agent '(run "inspect the repository and fix the test"))
+#+end_src
+
+The URL is intentionally a placeholder.  Use the current OpenAI-compatible
+endpoint documented by the selected provider.
+
+* Stdio protocol
+
+The standalone worker accepts one s-expression per line and produces one plist
+response per line.  A host sends:
+
+#+begin_example
+(models)
+(status)
+(chat "hello")
+(run "inspect the repository and fix the test")
+(switch "remote/poolside/laguna-s-2.1:free")
+(checkpoint)
+(restore (:format nl-agent-service-v1 ...))
+(stats)
+(quit)
+#+end_example
+
+For a brokered completion the worker first emits:
+
+#+begin_example
+(:event inference :request-id 1 :provider "remote" :model "..." ...)
+#+end_example
+
+The host answers =(inference-result 1 "text")= or
+=(inference-error 1 "reason")=.  The worker then returns the final service
+response.  This nested exchange keeps all fallback decisions in NeLisp.
+
+Before normal requests, the example worker asks for the current public model
+catalog and then its model-visible tool catalog:
+
+#+begin_example
+(:event model-catalog :request-id 1)
+(model-catalog-result 1 DESCRIPTORS)
+(:event tool-catalog :request-id 2)
+(tool-catalog-result 2 DESCRIPTORS)
+#+end_example
+
+The worker then emits =(:event ready)=, which prevents the first user request
+from racing either catalog handshake.  It repeats the model-catalog exchange
+before =(models)= and =(switch ...)=, validates the replacement in isolation,
+and updates the live broker registry in place.
+
+During =(run TASK)= the worker may also emit:
+
+#+begin_example
+(:event tool :request-id 2 :tool "shell" :args (:command "make test") ...)
+#+end_example
+
+The host applies its own policy and answers =(tool-result 2 "observation")= or
+=(tool-error 2 "reason")=.  Multiline strings are escaped on both sides before
+framing, including model replies, observations, trajectories, and checkpoints.
+
+The example host is safe by default: without an APPROVAL callback, write and
+execute tools are denied.  An interactive embedding can return =once=,
+=session=, or =deny= from that callback.  Session approval is scoped to the
+exact tool and arguments; hard-deny rules still take precedence.
+
+* Verification
+
+#+begin_src sh
+make test
+#+end_src
+
+The target currently runs 295 assertions across Emacs and standalone NeLisp,
+live process supervisor/tool tests on Emacs, two real-pipe smokes (including
+early flush), a CLI entry-point smoke, and strict byte compilation.  Network
+tests inject transport and never require a credential or consume a remote
+service quota.
+
+* Rebuilding and training models
+
+API responses cannot reproduce a remote model's original weights.  Remote
+models instead serve as replaceable inference providers, teachers, and
+evaluators.  A separately trained smaller native model can be registered with
+=nl-llm-agent-model-provider= and exposed through the same service.
+
+This is the intended implementation path: keep Solar, LongCat, Laguna, and
+similar free endpoints interchangeable at the provider boundary, while NeLisp
+builds and improves its own substantially smaller model.  Smaller parameter
+count reduces training cost; it does not by itself reproduce a trillion-scale
+teacher.  Capability must come from measured architecture, data, tools,
+retrieval, memory, distillation, and repeated held-out evaluation rather than a
+claim of weight reconstruction.
+
+=nelisp-llm='s champion/challenger gate trains and evaluates an isolated
+candidate, then promotes only a measured improvement.  The publish hook writes
+an immutable mode-0600 checkpoint and atomically replaces a data-only catalog;
+the champion commit happens only after publication succeeds.  NeLisp Agent
+validates the catalog and checkpoint architecture, verifies the recorded
+SHA-256 digest before open, and exposes the generation through the same provider
+contract as remote models.  It never rewrites the model currently serving a
+request.  The built-in PAV exporter preserves the independently trained output
+head used by =nelisp-llm='s P5 and on-device self-improvement models.
+
+** Evaluated improvement queue
+
+=nl-llm-agent-evolve-p5-queue= composes a P5-compatible trainable model, fixed
+evaluator, immutable publisher, and a bounded =trajectory-finetune= handler.
+Trusted host configuration chooses CPU training or a resident GPU challenger;
+the model-visible protocol is identical.  The host can expose it to the same
+standalone worker without exposing any callback:
+
+#+begin_src elisp
+(setq improvement-queue
+      (nl-llm-agent-evolve-p5-queue
+       trainable-model #'fixed-benchmark-score
+       "artifacts/catalog.json"
+       '(:type "done" :length 256)
+       :id-prefix "champion" :min-delta 0.01
+       :training-backend 'gpu :training-sequence 256
+       :optimizer 'sgd))
+
+(nl-agent-improvement-register-tools host-tools improvement-queue)
+#+end_src
+
+The model-visible protocol is data-only.  For example, an approved proposal can
+carry a bounded vector of its successful trajectories:
+
+#+begin_example
+```tool
+(:name "model.improvement.submit"
+ :arguments (:kind "trajectory-finetune"
+             :payload (:examples ["TASK: ...\n```tool ...```"]
+                       :lr 0.05 :epochs 2)))
+```
+#+end_example
+
+Calling =model.improvement.run= trains an isolated challenger, executes the
+trusted benchmark, and publishes only a measured improvement.  A regression,
+training failure, or publication failure leaves the champion unchanged.  A
+successful result includes its public =:publication= descriptor.  The model may
+then request =service.model.switch= with that provider-qualified id; after the
+separate host approval, the live worker refreshes its catalog and activates the
+generation without restarting.  The capstone test performs the entire sequence
+inside one agent run and confirms that the next inference uses the new model.
+The packaged =nl-agent-improvement-v1= JSON profile additionally persists queue
+state and resumes the newest verified champion without exposing training code.
+For GPU jobs it can also persist bounded mid-job training checkpoints.  A
+restarted running job stays =interrupted= until the model or operator calls the
+separately authorized =model.improvement.resume= tool; exact transaction binding
+prevents a stale optimizer state from being applied to another proposal or
+champion.  An explicit CLI scope can let the model repeat proposal, evaluation,
+publication, and activation unattended while every unrelated capability stays
+fail-closed.
+
+* Remaining product work
+
+- Background training with responsive conversation, a single queue/catalog
+  owner, and observed worker shutdown.  The proposed process boundary and
+  acceptance tests are in [[file:docs/background-training.md][the background training design]].
+- Legacy initialize-era MCP compatibility, fuller JSON Schema argument
+  validation, containerized terminal backends, and context-aware file
+  read/search tools.
+- A richer full-screen TUI/HTTP facade and broader packaged service profiles.
+- Export adapters for larger production training architectures, richer
+  constrained-action grammars, and a scalable binary/sharded recovery format
+  beyond the current bounded lightweight checkpoint host.
+- Long-run load, recovery, security, and end-to-end tests with a live provider.

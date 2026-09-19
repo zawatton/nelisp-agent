@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+agent_eval_bin_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+agent_eval_project_root=$(dirname -- "$agent_eval_bin_dir")
+agent_eval_emacs=${NELISP_AGENT_EMACS:-emacs}
+
+exec "$agent_eval_emacs" -Q --batch \
+  --eval '(setq load-prefer-newer t)' \
+  -L "$agent_eval_project_root/lisp" \
+  -L "$agent_eval_project_root/../nelisp-llm/lisp" \
+  -L "$agent_eval_project_root/../nelisp-photon/lisp" \
+  -l "$agent_eval_project_root/examples/evaluate-native-tasks.el" \
+  -f nl-agent-example-evaluate-native-tasks-main -- "$@"

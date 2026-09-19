@@ -1,0 +1,40 @@
+{
+  "format": "nl-agent-improvement-v1",
+  "catalog": "../state/background-task-promotion/models/catalog.json",
+  "queueState": "../state/background-task-promotion/improvement-queue.sexp",
+  "providerId": "native",
+  "providerName": "Background task-promotion NeLisp models",
+  "idPrefix": "task-promotion",
+  "grammar": {"type": "file-actions-v1", "max-field": 64},
+  "benchmark": {"examples": [" a"]},
+  "model": {
+    "source": "new", "dim": 2, "ff": 2,
+    "blocks": 1, "heads": 1, "maxParameters": 1000
+  },
+  "training": {
+    "execution": "background", "backend": "cpu",
+    "sequence": 64, "optimizer": "sgd"
+  },
+  "taskPromotion": {
+    "suite": {
+      "id": "background-task-promotion",
+      "version": "1",
+      "cases": [
+        {
+          "id": "rename-note",
+          "task": "Read note.txt, replace old with new, then finish.",
+          "files": [{"path": "note.txt", "text": "old\n"}],
+          "expected": [{"path": "note.txt", "text": "new\n"}]
+        }
+      ]
+    },
+    "grammar": {"type": "file-actions-v1", "max-field": 64},
+    "maxSequence": 4096,
+    "maxSteps": 1,
+    "auditDirectory": "../state/background-task-promotion/audit"
+  },
+  "minDelta": 0.0,
+  "maxSequence": 4096,
+  "maxPending": 8,
+  "maxHistory": 32
+}
