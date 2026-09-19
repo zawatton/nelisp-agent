@@ -519,13 +519,46 @@ afterwards. The replay forced every case through the diagnostics with a
 permissive policy; under the default policy three of the nine are refused at
 admission and never diagnosed at all.
 
-Two things this did **not** fix. `partial-source-coverage` still rejects
-`hermes3:8b`'s correct two-fact answer on `multi-file-negation`, because that
-answer cited one file: coverage counting measures citation completeness and
-nothing here changed that. And an answer that reports the absence *and then
-supplies a value anyway* is exempt from both absence codes, because the
-exemption is literal; no such answer has been observed, and inventing a
-sharper rule without a case to test it against would be guesswork.
+### Live confirmation, 2026-09-19 (hermes3:8b, after the change)
+
+The artifact is
+`target/bulk-policy/live-verify-absence-screen-hermes3-8b-20260919-192611/report.sexp`,
+whose `implementation.sha256` records the commit as well as the source hashes.
+Same main model, same worker, same settings; 214.0 seconds.
+
+The worker produced **the same wrong answer from the same narrow citation** as
+in the earlier run — 「代表電話の 06-1234-5678 が責任者の携帯電話番号です。」
+citing only line 3, 「代表電話は 06-1234-5678 です。」 — so the two runs differ
+only in the policy, not in the model output:
+
+| | Before the change | After |
+| --- | --- | --- |
+| Diagnostic | none | `uncited-absence-marker` |
+| Disposition | accept-for-review | reject |
+| Final path | delegated | direct |
+| Final answer | the wrong one | 「携帯電話番号は記載されていません。」, correct |
+
+`absent-field` went the other way, as intended: the correct absence answer was
+accepted with no diagnostic and no fallback, where before it was rejected.
+
+The arm totals show the trade rather than a saving: two rejections and two
+fallbacks in both runs, 24,543 request bytes now against 24,515 before. The
+count did not change but its content did — a rejection that discarded a
+correct answer was replaced by one that caught a wrong answer. The histogram
+is `((partial-source-coverage . 1) (uncited-absence-marker . 1))`.
+
+This is one run of one model on one corpus. It confirms that the replayed
+behaviour also occurs in a real run; it measures nothing new about quality or
+cost.
+
+Two things this did **not** fix. The first was re-confirmed in that run:
+`partial-source-coverage` still rejects `hermes3:8b`'s correct two-fact answer
+on `multi-file-negation`, because that answer cited one file. Coverage
+counting measures citation completeness, and nothing here changed that. The
+second has still never been observed: an answer that reports the absence *and
+then supplies a value anyway* is exempt from both absence codes, because the
+exemption is literal. Inventing a sharper rule without a case to test it
+against would be guesswork, so none was written.
 
 ### The worker model does not change the byte economics
 
