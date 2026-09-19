@@ -295,7 +295,12 @@ value anyway is exempt too, which is a known limitation recorded in
   (nl-agent-bulk-policy--validate-request request)
   (let ((diagnostics nil) (disposition 'accept-for-review) (status (plist-get result :status)))
     (if (not (eq status 'needs-review))
-      (progn (push (list :code 'worker-failed :severity 'reject :detail "Worker failed") diagnostics)
+      ;; Carry the reader's error code through, so a report says which way the
+      ;; worker failed instead of only that it did.
+      (progn (push (list :code 'worker-failed :severity 'reject
+                         :detail (format "Worker failed: status %s, error-code %s"
+                                         status (or (plist-get result :error-code) 'none)))
+                   diagnostics)
              (setq disposition 'reject))
       (let ((answer (plist-get result :answer)) (references (plist-get result :references))
             (not-found (plist-get result :not-found)) (paths (plist-get request :paths))

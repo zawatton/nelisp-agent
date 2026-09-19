@@ -182,6 +182,60 @@
     (should (equal (alist-get 'path (aref value 0)) "a.txt"))
     (should (equal (alist-get 'sha256 (aref value 1)) "b"))))
 
+(ert-deftest nl-agent-bulk-reader-test-empty-output-is-named-not-a-parse-error ()
+  "A provider that returns no content is reported as such.
+Observed with qwen3:4b, whose reasoning consumed the whole output budget so the
+message content came back empty; reporting that as a JSON parse failure hid the
+cause.  The reader does not infer why the content is empty, because the
+provider interface does not expose finish_reason."
+  (nl-agent-bulk-reader-test--file "data\n"
+    (let ((registry (nl-llm-agent-provider-registry-new)))
+      (nl-llm-agent-provider-register
+       registry
+       (nl-llm-agent-provider-new "local" :models '((:id "model"))
+                                  :open (lambda (_model _options) '(:state live))
+                                  :complete (lambda (_state _messages) "   ")
+                                  :close (lambda (_state) nil)))
+      (let* ((router (nl-agent-host-router-new registry))
+             (reader (nl-agent-bulk-reader-new router "local/model" '("local/model") directory))
+             (result (nl-agent-bulk-reader-run reader "where?" '("sample.txt"))))
+        (should (eq (plist-get result :status) 'failed))
+        (should (eq (plist-get result :error-code) 'empty-provider-output))))))
+
+(ert-deftest nl-agent-bulk-reader-test-malformed-output-keeps-the-generic-code ()
+  "Content that is present but unparseable stays a generic failure.
+This is the control for the test above: the new code must not swallow every
+failure."
+  (nl-agent-bulk-reader-test--file "data\n"
+    (let ((registry (nl-llm-agent-provider-registry-new)))
+      (nl-llm-agent-provider-register
+       registry
+       (nl-llm-agent-provider-new "local" :models '((:id "model"))
+                                  :open (lambda (_model _options) '(:state live))
+                                  :complete (lambda (_state _messages) "not json at all")
+                                  :close (lambda (_state) nil)))
+      (let* ((router (nl-agent-host-router-new registry))
+             (reader (nl-agent-bulk-reader-new router "local/model" '("local/model") directory))
+             (result (nl-agent-bulk-reader-run reader "where?" '("sample.txt"))))
+        (should (eq (plist-get result :status) 'failed))
+        (should (eq (plist-get result :error-code) 'bulk-reader-failure))))))
+
+(ert-deftest nl-agent-bulk-reader-test-default-output-budget-fits-reasoning-models ()
+  "The default worker budget is large enough for a model that thinks first.
+qwen3:4b spent 1024 tokens on reasoning and emitted no answer; the same request
+succeeded at 4096 with an answer of 38 completion tokens."
+  (nl-agent-bulk-reader-test--file "data\n"
+    (let* ((registry (nl-llm-agent-provider-registry-new))
+           (_ (nl-llm-agent-provider-register
+               registry
+               (nl-llm-agent-provider-new "local" :models '((:id "model"))
+                                          :open (lambda (_model _options) '(:state live))
+                                          :complete (lambda (_state _messages) "{}")
+                                          :close (lambda (_state) nil))))
+           (router (nl-agent-host-router-new registry))
+           (reader (nl-agent-bulk-reader-new router "local/model" '("local/model") directory)))
+      (should (= 4096 (nl-agent-bulk-reader-max-tokens reader))))))
+
 (ert-deftest nl-agent-bulk-reader-test-provider-failure-is-sanitized ()
   (nl-agent-bulk-reader-test--file "data\n"
     (let ((registry (nl-llm-agent-provider-registry-new)))

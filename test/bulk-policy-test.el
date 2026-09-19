@@ -123,6 +123,13 @@ Returns a fixture with :metrics as a nested plist."
       (should (cl-some (lambda (d) (and (eq (plist-get d :code) 'worker-failed)
                                         (eq (plist-get d :severity) 'reject)))
                        (plist-get result :diagnostics)))
+      ;; The detail names how the worker failed, so a report does not lose the
+      ;; reader's error code the way the qwen3:4b run did.
+      (should (string-match-p "error-code"
+                              (plist-get (cl-find 'worker-failed
+                                                  (plist-get result :diagnostics)
+                                                  :key (lambda (d) (plist-get d :code)))
+                                         :detail)))
       (let ((acct (plist-get result :accounting)))
         (should (= 1800 (plist-get acct :total-request-content-utf8-bytes)))
         (should (null (plist-get acct :total-output-utf8-bytes)))

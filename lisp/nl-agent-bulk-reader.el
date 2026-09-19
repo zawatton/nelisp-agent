@@ -64,7 +64,7 @@
     (error "bulk reader root must be local text"))
   (unless (and (stringp selector) (not (string-empty-p selector))) (error "invalid selector"))
   (let ((allowlist (nl-agent-bulk-reader--allowlist allowlist))
-        (max-tokens 1024) (timeout-sec 60) (temperature 0.2) (json-mode nil))
+        (max-tokens 4096) (timeout-sec 60) (temperature 0.2) (json-mode nil))
     (unless (member selector allowlist) (error "selector is not allowlisted"))
     (nl-agent-bulk-reader--keys keys '(:max-tokens :timeout-sec :temperature :json-mode) "bulk reader")
     (while keys
@@ -220,6 +220,7 @@
   "Read PATHS and perform one bounded local inference for QUESTION."
   (let ((started (float-time)) (sources nil) (messages nil) (output nil)
         (request-bytes nil) (output-bytes nil)
+        (error-code 'bulk-reader-failure)
         (selector (and (nl-agent-bulk-reader-p reader)
                        (nl-agent-bulk-reader-selector reader))))
     (condition-case _err
@@ -247,7 +248,14 @@
                   (setq output (nl-llm-agent-session-complete session messages)))
               (when session (nl-llm-agent-session-close session))))
           (setq output-bytes (string-bytes (encode-coding-string output 'utf-8 t)))
-          (unless (and (stringp output) (<= output-bytes nl-agent-bulk-reader-max-output-bytes)) (error "provider output exceeds 8192 UTF-8 bytes"))
+          ;; A provider that returns no content at all is reported as such
+          ;; rather than as a JSON parse failure.  The provider interface does
+          ;; not expose finish_reason, so the cause is not inferred here; see
+          ;; docs/bulk-policy.md for a case where it was output truncation.
+          (when (or (not (stringp output)) (string-empty-p (string-trim output)))
+            (setq error-code 'empty-provider-output)
+            (error "provider returned no content"))
+          (unless (<= output-bytes nl-agent-bulk-reader-max-output-bytes) (error "provider output exceeds 8192 UTF-8 bytes"))
           (let ((validated (nl-agent-bulk-reader--validate-output reader output sources)))
             (nl-agent-bulk-reader--bounded-tool-result
              (append (list :status 'needs-review :semantic-validation 'unverified
@@ -262,7 +270,7 @@
                                           :selector selector
                                           :json-mode (nl-agent-bulk-reader-json-mode reader)
                                           :token-counts (list :status 'unavailable :input nil :output nil)))))))
-      (error (list :status 'failed :error-code 'bulk-reader-failure
+      (error (list :status 'failed :error-code error-code
                    :metrics (list :role 'bulk-reader :policy-version nl-agent-bulk-reader-policy-version
                                   :json-mode (nl-agent-bulk-reader-json-mode reader)
                                   :request-content-utf8-bytes request-bytes

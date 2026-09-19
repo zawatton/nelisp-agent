@@ -512,7 +512,7 @@ FROZEN-CORPUS-PATH and POLICY-CORPUS-PATH are optional validation paths."
                              :close (lambda (&rest _) nil))))))
          (reader (nl-agent-bulk-reader-new
                   router worker-selector (list worker-selector) root
-                  :max-tokens 1024 :timeout-sec 60 :temperature 0.0
+                  :max-tokens 4096 :timeout-sec 60 :temperature 0.0
                   :json-mode (and live t)))
          (started (float-time))
          (prepared nil))

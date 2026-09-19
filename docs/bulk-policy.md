@@ -658,13 +658,47 @@ Zero content bytes after 42 to 50 seconds, then a schema failure on the empty
 string. The host recorded `bulk-reader-failure`; the reader sanitises provider
 detail, so the report does not say more.
 
-The likely cause is that the model's reasoning output consumed the 1024-token
-worker budget and the message content came back empty, which JSON mode does
-not prevent. **This was not tested.** Raising the output cap, disabling
-reasoning output, or inspecting the raw provider response would settle it, and
-none of that was done here. Nothing in this run licenses a claim about the
-model's capability: it is a statement about this model under these settings
-(1024-token cap, JSON mode, 60-second timeout).
+### Diagnosed: the reasoning output consumed the whole budget
+
+This was later settled by sending the reader's exact messages straight to the
+endpoint and reading the raw response, rather than by inference. Four variants,
+same messages, temperature 0:
+
+| Variant | Change | `finish_reason` | Content | Completion tokens |
+| --- | --- | --- | ---: | ---: |
+| A, as the harness ran it | 1024 cap, JSON mode | `length` | 0 chars | 1024 |
+| B | **4096 cap**, JSON mode | `stop` | **139 chars, schema-valid** | **38** |
+| C | 1024 cap, no JSON mode | `length` | 0 chars | 1024 |
+| D | 1024 cap, `enable_thinking: false` | `length` | 0 chars | 1024 |
+
+The model spent the entire 1024-token budget on reasoning and emitted no
+content. Ollama's OpenAI-compatible endpoint returns Qwen3's thinking in a
+separate `reasoning` field, so `content` is the empty string, and the reader
+then failed to parse it.
+
+Three things follow, and two of them contradict what one might have assumed.
+The answer itself needs **38 completion tokens**; only the reasoning is long,
+and B's answer was correct and cited the right line. **JSON mode is not
+implicated**: variant C truncates identically without it. And
+`chat_template_kwargs: {enable_thinking: false}` was accepted with HTTP 200 and
+**had no effect** — the model still produced 3,937 characters of reasoning. A
+different mechanism would be needed to suppress it, and none was tried.
+
+So the earlier hypothesis was right, and the conclusion it guarded is now
+stronger rather than weaker: `qwen3:4b` can do this task. The failure was the
+harness's output budget, not the model.
+
+Two changes came out of it. The reader's default `:max-tokens` is now 4096
+rather than 1024, since a budget that fits only the answer starves a model that
+thinks first. And an empty provider response is now reported as
+`empty-provider-output` instead of falling through to a generic parse failure,
+so the next occurrence names itself in the report. The reader does **not**
+infer truncation from emptiness: the provider interface exposes no
+`finish_reason`, and guessing a cause from a symptom is what cost a separate
+investigation here.
+
+The recorded runs above were all made at the 1024 budget, which is why they
+show the failures.
 
 ### The two usable answers were correct, and the fallback absorbed the rest
 
@@ -724,7 +758,13 @@ per worker.
 The worker comparisons above carry their own limits. `hermes3:8b` is quantised
 Q4_0 against the baseline worker's Q4_K_M, so a difference observed against it
 confounds model and quantisation, and at 8B it is not a cheap worker. The
-`qwen3:4b` failures were not diagnosed: the cause of the empty responses is a
-hypothesis, and the run says nothing about that model under different output
-limits or with reasoning output disabled. No run was repeated, so none of the
-three supports a latency comparison either.
+`qwen3:4b` empty responses have since been diagnosed as output-budget
+exhaustion, but that model was never re-run through the harness at the larger
+budget, so **its quality on this corpus is unmeasured** — one direct probe on
+one case is not a comparison. No run was repeated, so none of the three
+supports a latency comparison either.
+
+The raised default budget and the recorded runs do not match: every run above
+used 1024. A run at 4096 would change the worker's failure rate and, through
+that, the fallback count and the input totals. Nothing above has been
+re-measured against the new default.
