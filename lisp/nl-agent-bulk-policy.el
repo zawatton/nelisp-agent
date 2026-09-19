@@ -253,8 +253,24 @@ available, there is no evidence and the answer counts as not using it."
                 (nl-agent-bulk-policy--shared-span-p
                  answer (plist-get source :text) span))))))
 
-(defconst nl-agent-bulk-policy-rival-context-chars 16
-  "How much text before a number is taken as its context, in characters.")
+(defconst nl-agent-bulk-policy-rival-context-chars 32
+  "How much text before a number is taken as its context, in characters.
+
+Wide enough to reach the subject qualifier, which is what tells one reading of
+a value from another.  At sixteen 「第2回路の絶縁抵抗は」 fits but
+\"Circuit 2 insulation resistance is\" does not, so two English readings looked
+identical and the parallel-subject rule never saw the qualifier that separates
+them.")
+
+(defconst nl-agent-bulk-policy--rival-copula
+  (regexp-opt '(" is" " are" " was" " were" " of") t)
+  "Words that link a field name to its value, stripped like a separator.
+
+Japanese marks the link with 「は」, a character, so it belongs in the separator
+set.  English marks it with a word.  Without this a table cell reading
+\"Contract demand,250 kW\" cannot be matched against the prose \"the correct
+contract demand is 180 kW\", because stripping removes the comma from one side
+and leaves \"is\" on the other.")
 
 (defconst nl-agent-bulk-policy--rival-separator "[ \t,、|｜:：=＝は]"
   "Characters that separate a field name from its value.
@@ -345,14 +361,25 @@ the contradictions, because a real contradiction restates the same subject."
        (not (equal left right))
        (= 1 (cl-count nil (cl-mapcar #'eq (append left nil) (append right nil))))))
 
-(defun nl-agent-bulk-policy--strip-separators (text)
-  "Return TEXT without its trailing run of field separators."
+(defun nl-agent-bulk-policy--strip-separator-run (text)
+  "Return TEXT without its trailing run of separator characters."
   (let ((end (length text)))
     (while (and (> end 0)
                 (string-match-p nl-agent-bulk-policy--rival-separator
                                 (substring text (1- end) end)))
       (setq end (1- end)))
     (substring text 0 end)))
+
+(defun nl-agent-bulk-policy--strip-separators (text)
+  "Return TEXT without the separators and copula that link it to a value."
+  (let* ((trimmed (nl-agent-bulk-policy--strip-separator-run text))
+         (lowered (downcase trimmed))
+         (copula (let ((case-fold-search t))
+                   (when (string-match
+                          (concat nl-agent-bulk-policy--rival-copula "\\'") lowered)
+                     (match-beginning 0)))))
+    (nl-agent-bulk-policy--strip-separator-run
+     (if copula (substring trimmed 0 copula) trimmed))))
 
 (defun nl-agent-bulk-policy--rival-contexts-p (raw-mine raw-other)
   "Return non-nil when the contexts introduce competing readings of one slot."

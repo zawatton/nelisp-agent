@@ -1,0 +1,4 @@
+Equipment,Rated breaking current,Installed
+Building A,12.5 kA,2018
+Building B extension,20 kA,2024
+Old substation,8 kA,2005

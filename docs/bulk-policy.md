@@ -235,14 +235,18 @@ the recorded live reports, and `examples/bulk-dense-corpus.sexp`, five
 number-dense inspection records fed their own correct answers so that any fire
 is a false positive.
 
-| Version | Recorded: fires / true / false | Dense | Tables |
-| --- | --- | ---: | --- |
-| Shared wording only | 8 / 1 / 7 | — | — |
-| Plus the sentence-boundary cut | 1 / 1 / 0 | — | — |
-| Plus cross-source comparison | 4 / 4 / 0 | 3 false | — |
-| Plus identifier and parallel-subject rules | 4 / 4 / 0 | 1 false | — |
-| Plus a longer threshold | 4 / 4 / 0 | 0 false | **contradiction missed** |
-| Plus separator stripping | **4 / 4 / 0** | **0 false** | **0 false, caught** |
+| Version | Recorded | Dense | Tables | English |
+| --- | --- | ---: | --- | --- |
+| Shared wording only | 8 / 1 / 7 | — | — | — |
+| Plus the sentence-boundary cut | 1 / 1 / 0 | — | — | — |
+| Plus cross-source comparison | 4 / 4 / 0 | 3 false | — | — |
+| Plus identifier and parallel-subject rules | 4 / 4 / 0 | 1 false | — | — |
+| Plus a longer threshold | 4 / 4 / 0 | 0 false | **missed** | — |
+| Plus separator stripping | 4 / 4 / 0 | 0 false | caught | 1 caught, 1 **missed** |
+| Plus a wider window and copula stripping | **4 / 4 / 0** | **0 false** | **caught** | **2 caught, 1 false** |
+
+Recorded counts are fires / true / false over 86 worker answers; the corpora
+columns report false positives against their own correct answers.
 
 Each step was forced by a failure the previous step produced.
 
@@ -283,6 +287,30 @@ the threshold counts characters of what is left. On the stripped form
 絶縁抵抗 against 接地抵抗 share only 「抵抗」, so four characters is now
 enough, and the shortest genuine contradiction, 「契約電力」, is exactly four.
 
+### English works less well, and the guide says where
+
+`examples/bulk-en-corpus.sexp` repeats the material in English. Two changes
+were needed and both help every language: the context window widened from 16
+to 32 characters, because English phrasing pushes the subject qualifier out of
+a Japanese-sized window, and the copula is stripped like a separator, because
+English links a field to its value with the word "is" where Japanese uses the
+character 「は」. With those, both English contradictions are caught — the two
+dated procedures and the data sheet whose footnote corrects a cell. Neither
+change altered any Japanese result.
+
+**One false positive remains and is asserted in the tests rather than hidden.**
+`en-readings` flags a correct answer twice. English writes "Circuit 2" with
+the digit after a space, so the identifier rule — which looks for a letter or
+hyphen against the digit — does not see a label. And "insulation resistance"
+against "earth resistance" share the whole word " resistance", where 絶縁抵抗
+and 接地抵抗 share only 「抵抗」: the same distinction is two characters in
+Japanese and eleven in English, so no threshold separates the English pair.
+
+A rule keying on a capitalised word before the number removed that false
+positive and removed both English true positives with it, so it was not kept.
+**A host working in English should set `rival-value-screen` to `note`**, where
+the screen reports without rejecting.
+
 ### What it does not do
 
 It is **numeric only**. Two different venue names, or the fourth wrong answer
@@ -301,9 +329,11 @@ suggests. That is why `examples/bulk-dense-corpus.sexp` exists: repeated
 measurements, equipment labels, a schedule and an invoice, each fed its own
 correct answer. It broke three of the four rules' worth of the screen when it
 was first run, which is the point of it, and a test keeps it as a regression
-guard. Fourteen cases of incidental numbers, half of them tabular, is still not a
-wide sample, and the rules are tuned to Japanese phrasing where a measurement
-follows a particle or a delimiter. Another language has not been tried.
+guard. Nineteen cases of incidental numbers — prose, tables and English — is still
+not a wide sample. The rules are tuned to Japanese, where a compound like
+絶縁抵抗 distinguishes itself from 接地抵抗 in two characters; English spreads
+the same distinction over a shared word and defeats the threshold, which is
+why the screen is a note rather than a rejection there.
 
 ## Fallback and bounded attempts
 

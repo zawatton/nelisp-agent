@@ -372,6 +372,28 @@ began at the differing separator."
                  (nl-agent-bulk-policy-eval-test--screen-corpus
                   "examples/bulk-table-corpus.sexp"))))
 
+(ert-deftest bulk-policy-eval-test-rival-screen-on-english-corpus ()
+  "English sources: both contradictions caught, one false positive remains.
+`examples/bulk-en-corpus.sexp' is the same material in English.  Both genuine
+contradictions fire — the two dated procedures and the data sheet whose
+footnote corrects a cell, the latter only because the copula is stripped like
+a separator.
+
+`en-readings' is a **known false positive** and is asserted as such rather
+than hidden.  Two things defeat the rules there.  English writes 「Circuit 2」
+with the digit after a space, so the identifier rule, which looks for a letter
+or hyphen against the digit, does not see a label.  And 「insulation
+resistance」 against 「earth resistance」 share the whole word 「 resistance」,
+where the Japanese pair 絶縁抵抗 and 接地抵抗 share only 抵抗; no character
+threshold separates the English pair.
+
+A rule keying on a capitalised word before the number removed this false
+positive and also removed both true positives, so it was not kept.  A host
+working in English should set `rival-value-screen' to `note'."
+  (should (equal '("en-readings" "en-procedure-conflict" "en-datasheet-footnote")
+                 (nl-agent-bulk-policy-eval-test--screen-corpus
+                  "examples/bulk-en-corpus.sexp"))))
+
 (ert-deftest bulk-policy-eval-test-worker-timeout-override ()
   "The worker timeout defaults to the shipped value and validates overrides.
 A malformed override must signal: a measurement that silently fell back to the

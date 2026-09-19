@@ -1,0 +1,5 @@
+Monthly measurement record, May 2026
+Circuit 1 insulation resistance is 120 MOhm.
+Circuit 2 insulation resistance is 85 MOhm.
+Circuit 3 insulation resistance is 240 MOhm.
+Earth resistance is 8.5 Ohm.

@@ -1,0 +1,6 @@
+Cost breakdown
+Item,Amount
+Base fee,45000
+Extra inspection,12000
+Tax,5700
+Total,62700

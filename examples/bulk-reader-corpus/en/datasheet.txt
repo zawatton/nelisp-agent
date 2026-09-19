@@ -1,0 +1,7 @@
+Substation data sheet
+Item,Value
+Receiving voltage,6600 V
+Contract demand,250 kW
+Power factor,95 percent
+Note: the correct contract demand is 180 kW.
+No supporting document is attached.
