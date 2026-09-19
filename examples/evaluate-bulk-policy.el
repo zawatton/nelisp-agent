@@ -293,8 +293,12 @@ they cost without doubling the model calls.  The replay is reported as
                                             (nl-agent-example-bulk-eval--utf8-bytes
                                              (plist-get source :text)))
                                           sources)))
+         ;; The review kind doubles as the question kind the policy admits on,
+         ;; so a conflict or quoted-instruction case is refused delegation
+         ;; rather than relying on a diagnostic that cannot see those shapes.
          (request (list :question question :paths paths
-                        :source-bytes source-bytes))
+                        :source-bytes source-bytes
+                        :question-kind kind))
          (outcomes
           (list :direct
                 (list :status direct-status

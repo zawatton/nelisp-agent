@@ -14,30 +14,70 @@ delegation is considered. Delegation is opt-in only when the policy mode is
 
 ## Admission rules
 
-When mode is `opt-in`, requests are evaluated in this order; the first matching
-rule wins:
+Requests are evaluated in this fixed order and the first matching rule wins,
+so the recorded reason is deterministic:
 
-1. **`too-many-paths`**: Number of paths exceeds `max-paths` threshold.
+1. **`mode-direct-only`**: the policy mode is `direct-only`, the default.
+
+2. **`excluded-question-kind`**: the request declares a `:question-kind` that
+   `excluded-question-kinds` lists. Default: `conflict` and
+   `quoted-instruction`. See "Question kinds refused by policy" below. This is
+   a refusal to route a class of question, not a threshold.
+
+3. **`question-kind-unknown`**: `require-question-kind` is set, the default,
+   and the request declares no `:question-kind`. Delegation requires the
+   caller to have classified the question; an unclassified question is not
+   assumed safe.
+
+4. **`too-many-paths`**: Number of paths exceeds `max-paths` threshold.
    Default: max 1 path per request. This is a host configuration placeholder,
    not a threshold derived from measurement.
 
-2. **`question-too-large`**: Question UTF-8 size exceeds `max-question-bytes`.
+5. **`question-too-large`**: Question UTF-8 size exceeds `max-question-bytes`.
    Default: max 4096 bytes. Configuration placeholder.
 
-3. **`too-few-source-bytes`**: Total source size is below `min-source-bytes`.
+6. **`too-few-source-bytes`**: Total source size is below `min-source-bytes`.
    Default: min 8192 bytes. Configuration placeholder. The evaluation on
    `examples/bulk-reader-corpus` includes one case where a multi-file request
    with a small total (< 1 KB) was handled; see `bulk-reader.md` for details.
    One synthetic case cannot establish a production threshold.
 
-4. **`admitted`**: All prior checks passed. Admitted for delegation.
+7. **`admitted`**: all prior checks passed. Admitted for delegation.
 
-5. **`mode-direct-only`**: Policy mode is `direct-only` (always applied first).
+Rules 4 to 6 are host configuration placeholders, not empirical routing
+thresholds. The single large-source observation in `bulk-reader.md` cannot
+support a production threshold decision. Rules 2 and 3 are different in kind:
+they refuse to route rather than tune a limit.
 
-All defaults are host configuration placeholders. They are not empirical
-routing thresholds. The single large-source observation in `bulk-reader.md`
-(case `multi-file-negation`, ~9 KB combined) cannot support a production
-threshold decision.
+### Question kinds refused by policy
+
+The live baseline recorded below found two delegated failures that no
+diagnostic in this module can detect, because in both the citations were valid
+and complete and only the inference drawn from them was wrong. Rather than add
+a screen that cannot see the defect, the policy refuses to delegate those
+question kinds at all:
+
+- **`conflict`** — the answer has to resolve a disagreement between sources.
+  The worker answered with the revision the sources themselves mark invalid
+  and stated that no disagreement exists.
+- **`quoted-instruction`** — the answer has to judge an instruction quoted
+  inside the document. The worker concluded the instruction should be
+  followed while citing, as its reason, the line saying it is a past
+  transcription error.
+
+The list is a policy slot, not a constant in the check, so a host may widen or
+narrow it. Narrowing it re-enables a class of request that has been observed
+to fail with valid citations; that is the host's decision to make explicitly.
+
+`require-question-kind` is separate and defaults to on: a request that
+declares no kind is routed direct with reason `question-kind-unknown` instead
+of being treated as an ordinary factual question. A host that has no
+classifier can set `require-question-kind` to nil, which accepts the risk
+that an unclassified conflict question reaches the worker.
+
+Excluding a kind is not a claim that the class has been made safe. It is a
+statement that this module cannot tell a good answer from a bad one for that
+class, so it does not offer one.
 
 ## Diagnostic codes
 
@@ -87,10 +127,11 @@ from it is wrong:
   printed instruction should be followed while quoting, as its reason, the
   line saying the instruction is a past transcription error.
 
-Until a diagnostic covers these, a host that enables delegation should treat
-conflict-resolution questions and questions about quoted instructions as
-requiring human review regardless of disposition, or keep them on the direct
-path. `absence-marker-conflict` also fires on a *correct* absence answer,
+Both shapes are now refused at admission rather than screened: see
+"Question kinds refused by policy" above. A host that narrows
+`excluded-question-kinds` re-admits a class of request observed to fail while
+citing valid sources, and no diagnostic below will catch it.
+`absence-marker-conflict` also fires on a *correct* absence answer,
 because such an answer cites the excerpt that states the absence; that false
 positive is conservative and costs a fallback, not a wrong answer.
 
@@ -309,8 +350,18 @@ Every fallback that fired restored a correct answer: three rejections, three
 fallbacks, three final paths switched to direct. The two misses are the real
 gap. Both are "the citation is valid but the inference from it is wrong",
 which reference hashes and coverage counting cannot detect by construction.
-Either a new diagnostic is needed, or the policy should declare these two
-shapes out of scope for delegation.
+
+**These figures describe the run as measured, before the exclusion was
+added.** The measurement is what motivated it: `conflict` and
+`quoted-instruction` are now refused at admission, so on a re-run the
+exercise arm routes six of the nine cases and returns
+`excluded-question-kind` for the remaining three — the one conflict case and
+the two quoted-instruction cases — without invoking the worker at all. The two
+misses above can therefore no longer reach a delegated answer under the
+default policy. Nothing was re-measured to produce that statement; it follows
+from the admission order, and the evaluation asserts it deterministically in
+`test/bulk-policy-eval-test.el`. A fresh live run would be needed to say
+anything new about quality or cost.
 
 ### Total work: combined input more than doubled
 

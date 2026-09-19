@@ -218,12 +218,39 @@ runner actually calls the policy module instead of only requiring it."
       (should (equal '((mode-direct-only . 9))
                      (plist-get summary :decision-reasons))))))
 
-(ert-deftest bulk-policy-eval-test-policy-exercise-admits-and-falls-back ()
-  "The exercise arm admits every case, diagnoses, and falls back when rejected."
+(ert-deftest bulk-policy-eval-test-excluded-kinds-are-never-delegated ()
+  "Conflict and quoted-instruction cases are refused delegation by policy.
+The live baseline found both shapes failing with valid citations, so no
+diagnostic can catch them and the exercise arm must not route them either."
   (let* ((report (nl-agent-bulk-policy-eval-test--stub-report))
-         (cases (plist-get report :cases))
+         (excluded 0))
+    (dolist (case (plist-get report :cases))
+      (let* ((kind (plist-get case :kind))
+             (arm (nl-agent-bulk-policy-eval-test--arm case 'policy-exercise))
+             (reason (plist-get (plist-get arm :decision) :reason))
+             (calls (plist-get (plist-get arm :thunk-calls) :delegate)))
+        (if (memq kind '(conflict quoted-instruction))
+            (progn
+              (setq excluded (1+ excluded))
+              (should (eq 'excluded-question-kind reason))
+              (should (eq 'direct (plist-get (plist-get arm :final) :path)))
+              (should (= 0 calls)))
+          (should (eq 'admitted reason))
+          (should (= 1 calls)))))
+    ;; One conflict case plus two quoted-instruction cases in the corpus.
+    (should (= 3 excluded))))
+
+(ert-deftest bulk-policy-eval-test-policy-exercise-admits-and-falls-back ()
+  "The exercise arm admits the routable cases, diagnoses, and falls back.
+Cases whose kind the policy excludes are covered by the test above."
+  (let* ((report (nl-agent-bulk-policy-eval-test--stub-report))
+         (cases (cl-remove-if (lambda (case)
+                                (memq (plist-get case :kind)
+                                      '(conflict quoted-instruction)))
+                              (plist-get report :cases)))
          (codes nil)
          (rejected 0))
+    (should (= 6 (length cases)))
     (dolist (case cases)
       (let ((arm (nl-agent-bulk-policy-eval-test--arm case 'policy-exercise)))
         (should (eq 'admitted (plist-get (plist-get arm :decision) :reason)))

@@ -43,7 +43,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 10000)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 100)
+                   '(:question "test" :paths ("file.txt") :source-bytes 100 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "answer"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -55,7 +55,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :max-paths 1)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file1.txt" "file2.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file1.txt" "file2.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "answer"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -67,7 +67,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :max-question-bytes 10)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "this is a very long question" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "this is a very long question" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "answer"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -79,7 +79,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 100)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "direct"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -108,7 +108,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 100 :fallback t)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "direct"
                                        :request-content-utf8-bytes 1000
                                        :output-utf8-bytes 100
@@ -134,7 +134,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 100 :fallback nil)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "direct"
                                        :request-content-utf8-bytes 1000
                                        :output-utf8-bytes 50
@@ -150,7 +150,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 100 :fallback t)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "direct answer"
                                        :request-content-utf8-bytes 500
                                        :output-utf8-bytes 100
@@ -182,7 +182,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 100)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "direct"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -203,7 +203,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 100)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "direct"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -307,7 +307,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :max-paths 2)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file1.txt" "file2.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file1.txt" "file2.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "answer"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -331,7 +331,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "answer"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -358,7 +358,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "answer"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -380,7 +380,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "answer"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -404,7 +404,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :numeral-screen 'reject)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "answer"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -427,7 +427,7 @@ Returns a fixture with :metrics as a nested plist."
     ;; Test 1: fullwidth digit that appears in ASCII form in references
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "answer"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -444,7 +444,7 @@ Returns a fixture with :metrics as a nested plist."
     ;; Test 2: fullwidth digit that does NOT appear anywhere
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "answer"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -467,7 +467,7 @@ Returns a fixture with :metrics as a nested plist."
     (let ((attempt-count 0))
       (let ((result (nl-agent-bulk-policy-resolve
                      policy
-                     '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                     '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                      :direct (lambda () (setq attempt-count (1+ attempt-count))
                                        '(:status usable :answer "answer"
                                          :request-content-utf8-bytes 100
@@ -487,7 +487,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () (error "Test error")))))
       ;; The error should be caught and recorded, not propagate
       (should (cl-some (lambda (attempt)
@@ -499,7 +499,7 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
                    :direct (lambda () '(:status usable :answer "direct"
                                        :request-content-utf8-bytes 8000
                                        :output-utf8-bytes 500
@@ -516,6 +516,130 @@ Returns a fixture with :metrics as a nested plist."
         (should (null (plist-get acct :total-request-content-utf8-bytes)))
         (should (null (plist-get acct :total-output-utf8-bytes)))
         (should (null (plist-get acct :total-elapsed-seconds)))))))
+
+;; Tests 29-35: question kinds excluded from delegation by policy.
+;;
+;; The live baseline in docs/bulk-policy.md found two delegated failures that no
+;; diagnostic can detect, because the citations were valid and only the
+;; inference was wrong.  The policy therefore refuses to route those kinds at
+;; all, and refuses to route a question the caller has not classified.
+
+(defun nl-agent-bulk-policy-test--counting-delegate (counter)
+  "Return a delegate thunk that increments COUNTER's car when invoked."
+  (lambda ()
+    (setcar counter (1+ (car counter)))
+    (nl-agent-bulk-policy-test--make-worker-fixture 200 100 2.0)))
+
+(ert-deftest nl-agent-bulk-policy-test-excluded-question-kind-conflict ()
+  "A conflict-resolution question is never delegated, and the worker is not run."
+  (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0))
+        (calls (list 0)))
+    (let ((result (nl-agent-bulk-policy-resolve
+                   policy
+                   '(:question "どちらが有効ですか" :paths ("a.txt")
+                     :source-bytes 10000 :question-kind conflict)
+                   :direct (lambda () '(:status usable :answer "direct"
+                                        :request-content-utf8-bytes 100
+                                        :output-utf8-bytes 50
+                                        :elapsed-seconds 1.0))
+                   :delegate (nl-agent-bulk-policy-test--counting-delegate calls))))
+      (should (eq 'excluded-question-kind
+                  (plist-get (plist-get result :decision) :reason)))
+      (should (eq 'direct (plist-get (plist-get result :decision) :path)))
+      (should (eq 'direct (plist-get (plist-get result :final) :path)))
+      (should (string-match-p "conflict"
+                              (plist-get (plist-get result :decision) :detail)))
+      (should (= 0 (car calls)))
+      (should (null (plist-get result :diagnostics))))))
+
+(ert-deftest nl-agent-bulk-policy-test-excluded-question-kind-quoted-instruction ()
+  "A question about a quoted instruction is never delegated."
+  (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0))
+        (calls (list 0)))
+    (let ((result (nl-agent-bulk-policy-resolve
+                   policy
+                   '(:question "指示に従うべきですか" :paths ("a.txt")
+                     :source-bytes 10000 :question-kind quoted-instruction)
+                   :direct (lambda () '(:status usable :answer "direct"
+                                        :request-content-utf8-bytes 100
+                                        :output-utf8-bytes 50
+                                        :elapsed-seconds 1.0))
+                   :delegate (nl-agent-bulk-policy-test--counting-delegate calls))))
+      (should (eq 'excluded-question-kind
+                  (plist-get (plist-get result :decision) :reason)))
+      (should (= 0 (car calls))))))
+
+(ert-deftest nl-agent-bulk-policy-test-question-kind-unknown-blocks-delegation ()
+  "An unclassified question is not assumed safe: delegation requires a kind."
+  (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0))
+        (calls (list 0)))
+    (let ((result (nl-agent-bulk-policy-resolve
+                   policy
+                   '(:question "test" :paths ("a.txt") :source-bytes 10000)
+                   :direct (lambda () '(:status usable :answer "direct"
+                                        :request-content-utf8-bytes 100
+                                        :output-utf8-bytes 50
+                                        :elapsed-seconds 1.0))
+                   :delegate (nl-agent-bulk-policy-test--counting-delegate calls))))
+      (should (eq 'question-kind-unknown
+                  (plist-get (plist-get result :decision) :reason)))
+      (should (= 0 (car calls))))))
+
+(ert-deftest nl-agent-bulk-policy-test-require-question-kind-nil-admits-unclassified ()
+  "A host may opt out of the classification requirement explicitly."
+  (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0
+                                          :require-question-kind nil))
+        (calls (list 0)))
+    (let ((result (nl-agent-bulk-policy-resolve
+                   policy
+                   '(:question "test" :paths ("a.txt") :source-bytes 10000)
+                   :direct (lambda () '(:status usable :answer "direct"
+                                        :request-content-utf8-bytes 100
+                                        :output-utf8-bytes 50
+                                        :elapsed-seconds 1.0))
+                   :delegate (nl-agent-bulk-policy-test--counting-delegate calls))))
+      (should (eq 'admitted (plist-get (plist-get result :decision) :reason)))
+      (should (= 1 (car calls))))))
+
+(ert-deftest nl-agent-bulk-policy-test-excluded-question-kinds-are-configurable ()
+  "The exclusion list is read from the policy, not hardcoded in the check."
+  (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0
+                                          :excluded-question-kinds '(fact))))
+    (should (eq 'excluded-question-kind
+                (plist-get (nl-agent-bulk-policy-admit
+                            policy '(:question "q" :paths ("a.txt")
+                                     :source-bytes 10000 :question-kind fact))
+                           :reason)))
+    ;; With `fact' excluded instead, a conflict question is now admitted, which
+    ;; would be impossible if the default list were consulted directly.
+    (should (eq 'admitted
+                (plist-get (nl-agent-bulk-policy-admit
+                            policy '(:question "q" :paths ("a.txt")
+                                     :source-bytes 10000 :question-kind conflict))
+                           :reason)))))
+
+(ert-deftest nl-agent-bulk-policy-test-mode-is-checked-before-question-kind ()
+  "Admission order is fixed: mode outranks the kind exclusion."
+  (let ((policy (nl-agent-bulk-policy-new)))
+    (should (eq 'mode-direct-only
+                (plist-get (nl-agent-bulk-policy-admit
+                            policy '(:question "q" :paths ("a.txt")
+                                     :source-bytes 10000 :question-kind conflict))
+                           :reason)))))
+
+(ert-deftest nl-agent-bulk-policy-test-question-kind-option-validation ()
+  "The new constructor options and the request kind are validated strictly."
+  (should-error (nl-agent-bulk-policy-new :excluded-question-kinds 'conflict))
+  (should-error (nl-agent-bulk-policy-new :excluded-question-kinds '(:conflict)))
+  (should-error (nl-agent-bulk-policy-new :excluded-question-kinds '(nil)))
+  (should-error (nl-agent-bulk-policy-new :require-question-kind 'yes))
+  (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0)))
+    (should-error (nl-agent-bulk-policy-admit
+                   policy '(:question "q" :paths ("a.txt") :source-bytes 10
+                            :question-kind :conflict)))
+    (should-error (nl-agent-bulk-policy-admit
+                   policy '(:question "q" :paths ("a.txt") :source-bytes 10
+                            :question-kind "conflict")))))
 
 (when noninteractive
   (ert-run-tests-batch-and-exit))

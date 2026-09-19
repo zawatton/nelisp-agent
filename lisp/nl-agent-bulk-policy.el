@@ -11,8 +11,28 @@
   '("記載されていません" "記載がありません" "記載なし" "該当なし"
     "not recorded" "no record" "not listed" "not available"))
 
+(defconst nl-agent-bulk-policy-default-excluded-question-kinds
+  '(conflict quoted-instruction)
+  "Question kinds that may not be delegated, whatever the diagnostics say.
+
+Both shapes were observed to fail delegation while producing valid citations,
+so no diagnostic in this module can detect them: the cited ranges are real and
+complete, and only the inference drawn from them is wrong.
+
+- `conflict': the answer must resolve a disagreement between sources.  A worker
+  answered with the revision the sources themselves mark invalid and stated
+  that no disagreement exists.
+- `quoted-instruction': the answer must judge an instruction quoted inside the
+  document.  A worker concluded the instruction should be followed while citing
+  the line that says it is a past transcription error.
+
+Excluding them at admission is a deliberate refusal to route a class of
+question, not a claim that the class has been made safe.  See
+`docs/bulk-policy.md'.")
+
 (cl-defstruct (nl-agent-bulk-policy (:constructor nl-agent-bulk-policy--make))
-  mode min-source-bytes max-paths max-question-bytes fallback absence-markers numeral-screen)
+  mode min-source-bytes max-paths max-question-bytes fallback absence-markers
+  numeral-screen excluded-question-kinds require-question-kind)
 
 (defun nl-agent-bulk-policy--validate-keys (keys allowed where)
   (unless (and (listp keys) (proper-list-p keys) (= 0 (% (length keys) 2)))
@@ -30,9 +50,13 @@
   "Create a new delegation policy with validated settings."
   (let ((mode 'direct-only) (min-source-bytes 8192) (max-paths 1) (max-question-bytes 4096)
         (fallback t) (absence-markers (copy-sequence nl-agent-bulk-policy-default-absence-markers))
-        (numeral-screen 'note))
+        (numeral-screen 'note)
+        (excluded-question-kinds
+         (copy-sequence nl-agent-bulk-policy-default-excluded-question-kinds))
+        (require-question-kind t))
     (nl-agent-bulk-policy--validate-keys keys
-      '(:mode :min-source-bytes :max-paths :max-question-bytes :fallback :absence-markers :numeral-screen)
+      '(:mode :min-source-bytes :max-paths :max-question-bytes :fallback :absence-markers
+        :numeral-screen :excluded-question-kinds :require-question-kind)
       "nl-agent-bulk-policy-new")
     (while keys
       (pcase (pop keys)
@@ -42,7 +66,9 @@
         (:max-question-bytes (setq max-question-bytes (pop keys)))
         (:fallback (setq fallback (pop keys)))
         (:absence-markers (setq absence-markers (pop keys)))
-        (:numeral-screen (setq numeral-screen (pop keys)))))
+        (:numeral-screen (setq numeral-screen (pop keys)))
+        (:excluded-question-kinds (setq excluded-question-kinds (pop keys)))
+        (:require-question-kind (setq require-question-kind (pop keys)))))
     (unless (memq mode '(direct-only opt-in)) (error "mode must be direct-only or opt-in, got %S" mode))
     (unless (and (integerp min-source-bytes) (>= min-source-bytes 0) (<= min-source-bytes 131072))
       (error "min-source-bytes must be 0..131072, got %S" min-source-bytes))
@@ -58,9 +84,19 @@
         (error "absence-markers must contain non-empty strings")))
     (setq absence-markers (copy-sequence absence-markers))
     (unless (memq numeral-screen '(note reject)) (error "numeral-screen must be note or reject, got %S" numeral-screen))
+    (unless (and (listp excluded-question-kinds) (proper-list-p excluded-question-kinds))
+      (error "excluded-question-kinds must be a proper list, got %S" excluded-question-kinds))
+    (dolist (kind excluded-question-kinds)
+      (unless (and kind (symbolp kind) (not (keywordp kind)))
+        (error "excluded-question-kinds must contain non-nil non-keyword symbols, got %S" kind)))
+    (setq excluded-question-kinds (copy-sequence excluded-question-kinds))
+    (unless (or (null require-question-kind) (eq require-question-kind t))
+      (error "require-question-kind must be t or nil, got %S" require-question-kind))
     (nl-agent-bulk-policy--make :mode mode :min-source-bytes min-source-bytes :max-paths max-paths
                                  :max-question-bytes max-question-bytes :fallback fallback
-                                 :absence-markers absence-markers :numeral-screen numeral-screen)))
+                                 :absence-markers absence-markers :numeral-screen numeral-screen
+                                 :excluded-question-kinds excluded-question-kinds
+                                 :require-question-kind require-question-kind)))
 
 (defun nl-agent-bulk-policy--validate-request (request)
   (unless (and (listp request) (proper-list-p request)) (error "request must be a proper list"))
@@ -68,10 +104,16 @@
     (unless (= (% (length keys) 2) 0) (error "request must have even number of elements"))
     (while keys
       (let ((key (pop keys)))
-        (unless (memq key '(:question :paths :source-bytes)) (error "request has unexpected key %S" key))
+        (unless (memq key '(:question :paths :source-bytes :question-kind))
+          (error "request has unexpected key %S" key))
         (when (memq key seen) (error "request has duplicate key %S" key))
         (push key seen) (pop keys)))
-    (unless (= (length seen) 3) (error "request must have exactly keys :question :paths :source-bytes")))
+    (dolist (required '(:question :paths :source-bytes))
+      (unless (memq required seen)
+        (error "request must have keys :question :paths :source-bytes, missing %S" required))))
+  (let ((kind (plist-get request :question-kind)))
+    (unless (or (null kind) (and (symbolp kind) (not (keywordp kind))))
+      (error "request :question-kind must be a non-keyword symbol or nil, got %S" kind)))
   (let ((question (plist-get request :question)))
     (unless (and (stringp question) (not (string-empty-p question)))
       (error "request :question must be a non-empty string")))
@@ -91,24 +133,53 @@
 
 ;;;###autoload
 (defun nl-agent-bulk-policy-admit (policy request)
-  "Evaluate REQUEST against POLICY and return routing decision."
+  "Evaluate REQUEST against POLICY and return the routing decision.
+
+The checks run in this fixed order, so the recorded reason is deterministic:
+
+1. `mode-direct-only' — the policy is not opted in.
+2. `excluded-question-kind' — REQUEST declares a `:question-kind' the policy
+   refuses to delegate at all.  See
+   `nl-agent-bulk-policy-default-excluded-question-kinds'.
+3. `question-kind-unknown' — the policy requires a declared kind and REQUEST
+   has none.  Delegation requires the caller to have classified the question;
+   an unclassified question is not assumed safe.
+4. `too-many-paths'.
+5. `question-too-large'.
+6. `too-few-source-bytes'.
+7. `admitted'.
+
+Checks 2 and 3 are refusals to route a class of question, not evidence that
+the class has been made safe."
   (unless (nl-agent-bulk-policy-p policy) (error "invalid policy"))
   (nl-agent-bulk-policy--validate-request request)
   (let ((question (plist-get request :question)) (paths (plist-get request :paths))
-        (source-bytes (plist-get request :source-bytes)))
-    (if (not (eq (nl-agent-bulk-policy-mode policy) 'opt-in))
-      (list :path 'direct :reason 'mode-direct-only :detail "Policy mode is direct-only")
-      (if (> (length paths) (nl-agent-bulk-policy-max-paths policy))
-        (list :path 'direct :reason 'too-many-paths
-              :detail (format "Request has %d paths, max is %d" (length paths) (nl-agent-bulk-policy-max-paths policy)))
-        (let ((qbytes (string-bytes (encode-coding-string question 'utf-8 t))))
-          (if (> qbytes (nl-agent-bulk-policy-max-question-bytes policy))
-            (list :path 'direct :reason 'question-too-large
-                  :detail (format "Question is %d UTF-8 bytes, max is %d" qbytes (nl-agent-bulk-policy-max-question-bytes policy)))
-            (if (< source-bytes (nl-agent-bulk-policy-min-source-bytes policy))
-              (list :path 'direct :reason 'too-few-source-bytes
-                    :detail (format "Source is %d bytes, min is %d" source-bytes (nl-agent-bulk-policy-min-source-bytes policy)))
-              (list :path 'delegated :reason 'admitted :detail "Admitted for delegation"))))))))
+        (source-bytes (plist-get request :source-bytes))
+        (kind (plist-get request :question-kind)))
+    (cond
+     ((not (eq (nl-agent-bulk-policy-mode policy) 'opt-in))
+      (list :path 'direct :reason 'mode-direct-only :detail "Policy mode is direct-only"))
+     ((and kind (memq kind (nl-agent-bulk-policy-excluded-question-kinds policy)))
+      (list :path 'direct :reason 'excluded-question-kind
+            :detail (format "Question kind %s is excluded from delegation" kind)))
+     ((and (null kind) (nl-agent-bulk-policy-require-question-kind policy))
+      (list :path 'direct :reason 'question-kind-unknown
+            :detail "Request declares no :question-kind and the policy requires one"))
+     ((> (length paths) (nl-agent-bulk-policy-max-paths policy))
+      (list :path 'direct :reason 'too-many-paths
+            :detail (format "Request has %d paths, max is %d" (length paths)
+                            (nl-agent-bulk-policy-max-paths policy))))
+     ((> (string-bytes (encode-coding-string question 'utf-8 t))
+         (nl-agent-bulk-policy-max-question-bytes policy))
+      (list :path 'direct :reason 'question-too-large
+            :detail (format "Question is %d UTF-8 bytes, max is %d"
+                            (string-bytes (encode-coding-string question 'utf-8 t))
+                            (nl-agent-bulk-policy-max-question-bytes policy))))
+     ((< source-bytes (nl-agent-bulk-policy-min-source-bytes policy))
+      (list :path 'direct :reason 'too-few-source-bytes
+            :detail (format "Source is %d bytes, min is %d" source-bytes
+                            (nl-agent-bulk-policy-min-source-bytes policy))))
+     (t (list :path 'delegated :reason 'admitted :detail "Admitted for delegation")))))
 
 (defun nl-agent-bulk-policy--normalize-fullwidth-digits (text)
   "Convert fullwidth digits to ASCII."
