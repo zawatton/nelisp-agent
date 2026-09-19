@@ -33,7 +33,7 @@ question, not a claim that the class has been made safe.  See
 (cl-defstruct (nl-agent-bulk-policy (:constructor nl-agent-bulk-policy--make))
   mode min-source-bytes max-paths max-question-bytes fallback absence-markers
   numeral-screen excluded-question-kinds require-question-kind
-  uncited-absence-screen coverage-overlap-chars)
+  uncited-absence-screen coverage-overlap-chars rival-value-screen)
 
 (defun nl-agent-bulk-policy--validate-keys (keys allowed where)
   (unless (and (listp keys) (proper-list-p keys) (= 0 (% (length keys) 2)))
@@ -56,11 +56,12 @@ question, not a claim that the class has been made safe.  See
          (copy-sequence nl-agent-bulk-policy-default-excluded-question-kinds))
         (require-question-kind t)
         (uncited-absence-screen 'reject)
-        (coverage-overlap-chars 8))
+        (coverage-overlap-chars 8)
+        (rival-value-screen 'reject))
     (nl-agent-bulk-policy--validate-keys keys
       '(:mode :min-source-bytes :max-paths :max-question-bytes :fallback :absence-markers
         :numeral-screen :excluded-question-kinds :require-question-kind
-        :uncited-absence-screen :coverage-overlap-chars)
+        :uncited-absence-screen :coverage-overlap-chars :rival-value-screen)
       "nl-agent-bulk-policy-new")
     (while keys
       (pcase (pop keys)
@@ -74,7 +75,8 @@ question, not a claim that the class has been made safe.  See
         (:excluded-question-kinds (setq excluded-question-kinds (pop keys)))
         (:require-question-kind (setq require-question-kind (pop keys)))
         (:uncited-absence-screen (setq uncited-absence-screen (pop keys)))
-        (:coverage-overlap-chars (setq coverage-overlap-chars (pop keys)))))
+        (:coverage-overlap-chars (setq coverage-overlap-chars (pop keys)))
+        (:rival-value-screen (setq rival-value-screen (pop keys)))))
     (unless (memq mode '(direct-only opt-in)) (error "mode must be direct-only or opt-in, got %S" mode))
     (unless (and (integerp min-source-bytes) (>= min-source-bytes 0) (<= min-source-bytes 131072))
       (error "min-source-bytes must be 0..131072, got %S" min-source-bytes))
@@ -105,13 +107,16 @@ question, not a claim that the class has been made safe.  See
                      (<= 2 coverage-overlap-chars 256)))
       (error "coverage-overlap-chars must be an integer 2..256 or nil, got %S"
              coverage-overlap-chars))
+    (unless (memq rival-value-screen '(reject note nil))
+      (error "rival-value-screen must be reject, note or nil, got %S" rival-value-screen))
     (nl-agent-bulk-policy--make :mode mode :min-source-bytes min-source-bytes :max-paths max-paths
                                  :max-question-bytes max-question-bytes :fallback fallback
                                  :absence-markers absence-markers :numeral-screen numeral-screen
                                  :excluded-question-kinds excluded-question-kinds
                                  :require-question-kind require-question-kind
                                  :uncited-absence-screen uncited-absence-screen
-                                 :coverage-overlap-chars coverage-overlap-chars)))
+                                 :coverage-overlap-chars coverage-overlap-chars
+                                 :rival-value-screen rival-value-screen)))
 
 (defun nl-agent-bulk-policy--validate-request (request)
   (unless (and (listp request) (proper-list-p request)) (error "request must be a proper list"))
@@ -247,6 +252,100 @@ available, there is no evidence and the answer counts as not using it."
            (and source
                 (nl-agent-bulk-policy--shared-span-p
                  answer (plist-get source :text) span))))))
+
+(defconst nl-agent-bulk-policy-rival-context-chars 16
+  "How much text before a number is taken as its context, in characters.")
+
+(defconst nl-agent-bulk-policy-rival-match-chars 4
+  "How many characters two contexts must share, ending at the number.
+
+Two numbers whose immediately preceding text agrees for this many characters
+are treated as candidates for the same slot: 点検間隔は6か月 and 点検間隔は12か月
+share 「点検間隔は」.  Shorter matches make unrelated numbers look like rivals;
+longer ones miss a rival phrased slightly differently.")
+
+(defconst nl-agent-bulk-policy--rival-boundary "[。．\\.!?！？\n\r]"
+  "Characters that end the phrase introducing a number.
+
+The context is cut at the nearest one.  Without this a match can run past a
+sentence end and pair numbers that only share the tail of the previous
+sentence: 「…です。 手順2」 and 「…ます。 手順3」 share 「。 手順」 although the
+numbers are list labels rather than rival readings of one value.  Measured
+against the recorded runs, that single rule removed seven false positives and
+kept the one true positive.")
+
+(defun nl-agent-bulk-policy--numeral-contexts (text)
+  "Return ((VALUE . LEFT-CONTEXT) ...) for every digit run in TEXT.
+Fullwidth digits are normalised first.  LEFT-CONTEXT reaches back at most
+`nl-agent-bulk-policy-rival-context-chars' characters and stops at the nearest
+sentence boundary, so it holds the wording that introduces this number and
+nothing from the sentence before it."
+  (let* ((norm (nl-agent-bulk-policy--normalize-fullwidth-digits text))
+         (result nil)
+         (start 0))
+    (while (and (< start (length norm)) (string-match "[0-9]+" norm start))
+      (let* ((begin (match-beginning 0))
+             (end (match-end 0))
+             (window (substring norm (max 0 (- begin nl-agent-bulk-policy-rival-context-chars))
+                                begin))
+             (cut (let ((last nil) (index 0))
+                    (while (string-match nl-agent-bulk-policy--rival-boundary window index)
+                      (setq last (match-end 0) index (match-end 0)))
+                    last)))
+        (push (cons (substring norm begin end)
+                    (string-trim-left (if cut (substring window cut) window)))
+              result)
+        (setq start end)))
+    (nreverse result)))
+
+(defun nl-agent-bulk-policy--shared-tail (left right)
+  "Return how many characters LEFT and RIGHT share, counting back from the end."
+  (let ((shared 0)
+        (index-left (length left))
+        (index-right (length right)))
+    (while (and (> index-left 0) (> index-right 0)
+                (eq (aref left (1- index-left)) (aref right (1- index-right))))
+      (setq shared (1+ shared) index-left (1- index-left) index-right (1- index-right)))
+    shared))
+
+(defun nl-agent-bulk-policy--unreported-rivals (answer sources)
+  "Return rivals of ANSWER's numbers that SOURCES state and ANSWER omits.
+
+For every number the answer asserts, the sources are searched for a different
+number introduced by the same wording.  Such a number is a rival reading of the
+same slot, and an answer that states one without the other has resolved a
+disagreement silently.  A rival the answer also mentions is not reported: an
+answer carrying both values is engaging with the disagreement rather than
+hiding it, which is checked by value rather than by looking for words like
+\"conflict\" because an answer may contain such a word while denying the
+disagreement.
+
+Each element is (VALUE RIVAL PATH CONTEXT)."
+  (let* ((answer-values (mapcar #'car (nl-agent-bulk-policy--numeral-contexts answer)))
+         (entries nil)
+         (found nil))
+    ;; One flat list across every source: a disagreement usually lies between
+    ;; two files, so comparing only within a file would miss the common case.
+    (dolist (source sources)
+      (dolist (context (nl-agent-bulk-policy--numeral-contexts
+                        (or (plist-get source :text) "")))
+        (push (list (car context) (cdr context) (plist-get source :path)) entries)))
+    (setq entries (nreverse entries))
+    (when answer-values
+      (dolist (mine entries)
+        (when (member (car mine) answer-values)
+          (dolist (other entries)
+            (unless (or (equal (car other) (car mine))
+                        (member (car other) answer-values)
+                        (assoc (car mine) found))
+              (when (>= (nl-agent-bulk-policy--shared-tail (nth 1 mine) (nth 1 other))
+                        nl-agent-bulk-policy-rival-match-chars)
+                (push (list (car mine) (car other) (nth 2 other)
+                            (substring (nth 1 other)
+                                       (max 0 (- (length (nth 1 other))
+                                                 nl-agent-bulk-policy-rival-match-chars))))
+                      found)))))))
+    (nreverse found)))
 
 (defun nl-agent-bulk-policy--absence-reported-p (policy text)
   "Return non-nil when TEXT itself reports an absence under POLICY's markers.
@@ -407,6 +506,23 @@ value anyway is exempt too, which is a known limitation recorded in
                                   diagnostics)
                             (when (eq screen 'reject) (setq disposition 'reject))
                             (throw 'nl-agent-bulk-policy--found t)))))))))))
+        ;; A value the sources contradict, where the answer names one reading
+        ;; and not the other.  No citation-shaped check can see this: every
+        ;; cited line is real and only the reading is wrong.
+        (let ((screen (nl-agent-bulk-policy-rival-value-screen policy)))
+          (when (and screen (not not-found) (stringp answer))
+            (if (null sources)
+                (progn
+                  (push (list :code 'rival-scope-unavailable :severity 'reject
+                              :detail "rival-value-screen is enabled but the request supplied no :sources")
+                        diagnostics)
+                  (setq disposition 'reject))
+              (dolist (rival (nl-agent-bulk-policy--unreported-rivals answer sources))
+                (push (list :code 'unreported-rival-value :severity screen
+                            :detail (format "Answer states %s but %s states %s after %S"
+                                            (nth 0 rival) (nth 2 rival) (nth 1 rival) (nth 3 rival)))
+                      diagnostics)
+                (when (eq screen 'reject) (setq disposition 'reject))))))
         (let ((unsupported (nl-agent-bulk-policy--unsupported-numerals answer references
                                                                         (nl-agent-bulk-policy-absence-markers policy))))
           (when unsupported

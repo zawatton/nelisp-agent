@@ -147,6 +147,18 @@ answer is not usable without fallback or human correction.
     answer presented as final. The default is `reject` for that reason, and
     `note` or nil are available for hosts that judge the trade differently.
 
+**`unreported-rival-value`** (severity: `rival-value-screen`, default reject)
+  - The answer states a number that the sources contradict, and does not
+    mention the competing value.
+  - This is the only screen aimed at an answer whose citations are all
+    genuine and whose reading of them is wrong. See "Detecting a disagreement
+    the answer does not report" below.
+
+**`rival-scope-unavailable`** (severity: reject)
+  - `rival-value-screen` is enabled but the request supplied no `:sources`.
+    As with the absence screen, a configured check that cannot run rejects
+    rather than skipping.
+
 **`absence-scope-unavailable`** (severity: reject)
   - `uncited-absence-screen` is enabled but the request supplied no
     `:sources`, so a configured check cannot run.
@@ -186,6 +198,73 @@ citing valid sources, and no diagnostic below will catch it.
 The absence screens no longer fire on a *correct* absence answer: an answer
 that itself reports the absence is exempt, since it agrees with the cited line
 rather than contradicting it.
+
+## Detecting a disagreement the answer does not report
+
+The excluded-kind measurement left one clear gap: a worker answers a
+contradicted question with a single confident value and never mentions that
+the sources disagree. Every cited line is genuine, so nothing that checks the
+shape of citations can see it.
+
+### What the host can actually see
+
+Only the question, the sources, the answer and the citations — no meaning. The
+screen therefore works from the values the answer itself asserts:
+
+1. Take each digit run in the answer.
+2. Find where that number occurs in the sources, and take the wording that
+   introduces it: up to 16 characters back, **cut at the nearest sentence
+   boundary**.
+3. Look across **all** sources for a different number whose introducing
+   wording ends the same way, sharing at least 4 characters. 点検間隔は6か月
+   and 点検間隔は12か月 share 「検間隔は」, so 6 and 12 are readings of one slot.
+4. If the answer does not also state that rival, it resolved a disagreement
+   silently.
+
+The exemption is **by value, not by wording**. An answer naming both readings
+is engaging with the disagreement; an answer containing the word 食い違い is
+not necessarily, because one recorded answer read 「9月10日です。資料間で食い違いは
+ありません。」 — the marker present and negated. Only naming the other value
+exempts.
+
+### Calibration
+
+Both thresholds were chosen by running the screen over every recorded live
+report — 86 worker answers — rather than by argument.
+
+| Version | Fires | True | False |
+| --- | ---: | ---: | ---: |
+| Shared wording only | 8 | 1 | 7 |
+| Plus the sentence-boundary cut | 1 | 1 | 0 |
+| Plus cross-source comparison | **4** | **4** | **0** |
+
+The seven false positives were all one case: 手順2 and 手順3 are list labels
+whose contexts share only 「。 手順」, the end of the previous sentence. Cutting
+the context at sentence boundaries removed all seven and kept the true
+positive.
+
+The first implementation compared numbers only within a single file, which
+calibration exposed: it found the self-contradicting file and missed both
+cross-file conflicts, which are the commoner shape. Comparing across sources
+raised the count to four, and all four are the conflict answers judged wrong
+by hand: two runs of `conflicting-sources`, plus `conflict-within-file` and
+`conflict-by-date`.
+
+### What it does not do
+
+It is **numeric only**. Two different venue names, or the fourth wrong answer
+in that measurement — an instruction addressed to a contractor, answered
+「はい」 — leave no numeric trace and are invisible to it.
+
+It therefore **does not justify narrowing the exclusion**. Conflict and
+quoted-instruction questions stay refused at admission: the screen covers one
+shape of one of those kinds. Its value is elsewhere, on the questions the
+policy does route, where the sources happen to disagree and nothing previously
+looked.
+
+The 86 answers come from 14 distinct cases repeated across runs, so the zero
+false positives is a weaker result than the number suggests. A corpus with
+more incidental numbers would test it harder, and none exists yet.
 
 ## Fallback and bounded attempts
 

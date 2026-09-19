@@ -745,7 +745,11 @@ This removes the false positive both live runs produced on absent-field."
 (ert-deftest nl-agent-bulk-policy-test-uncited-absence-screen-off-is-explicit ()
   "Turning the screen off is a configuration choice, and then nothing fires."
   (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0
-                                           :uncited-absence-screen nil))
+                                           :uncited-absence-screen nil
+                                           ;; The rival screen also needs
+                                           ;; sources; off here so this test
+                                           ;; isolates the absence screen.
+                                           :rival-value-screen nil))
          (diag (nl-agent-bulk-policy-diagnose
                 policy
                 (nl-agent-bulk-policy-test--absence-request)
@@ -897,6 +901,143 @@ default span, so the rejection stands."
   (should-error (nl-agent-bulk-policy-new :coverage-overlap-chars "8"))
   (should (nl-agent-bulk-policy-p (nl-agent-bulk-policy-new :coverage-overlap-chars nil)))
   (should (nl-agent-bulk-policy-p (nl-agent-bulk-policy-new :coverage-overlap-chars 2))))
+
+;; Tests 49-55: the rival-value screen.
+;;
+;; The fixtures are the three conflict answers the recorded runs actually
+;; produced, plus the correct answer that must not be flagged.  This is the
+;; only screen aimed at a wrong answer whose citations are all genuine.
+
+(defconst nl-agent-bulk-policy-test--rival-sources
+  '((:path "a.txt" :text "作業手順書\n発行日: 2026年4月1日\n高圧受電盤の点検間隔は6か月です。\n")
+    (:path "b.txt" :text "作業手順書\n発行日: 2026年9月1日\n高圧受電盤の点検間隔は12か月です。\n"))
+  "Two dated procedures that disagree, as recorded in the excluded corpus.")
+
+(defun nl-agent-bulk-policy-test--rival-request (&rest extra)
+  (append (list :question "点検間隔は何か月ですか" :paths '("a.txt" "b.txt")
+                :source-bytes 10000 :question-kind 'fact)
+          extra))
+
+(defun nl-agent-bulk-policy-test--rival-worker (answer &optional cited)
+  "A worker result answering ANSWER while citing CITED, both files by default.
+Both are cited so that coverage counting cannot reject the fixture and mask
+what the rival screen does."
+  (nl-agent-bulk-policy-test--make-worker-fixture
+   200 100 2.0 :status 'needs-review :answer answer
+   :references (mapcar (lambda (path)
+                         (list :path path :start-line 3 :end-line 3
+                               :sha256 (make-string 64 ?a)
+                               :text "高圧受電盤の点検間隔は6か月です。"))
+                       (or cited '("a.txt" "b.txt")))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-value-across-files ()
+  "An answer naming one of two disagreeing values is rejected.
+Recorded: qwen3:4b answered 6 months from the April procedure while the
+September one says 12, mentioning neither the other value nor the
+disagreement."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0 :max-paths 2))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--rival-request
+                 :sources nl-agent-bulk-policy-test--rival-sources)
+                (nl-agent-bulk-policy-test--rival-worker "6 months"))))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should (cl-some (lambda (d) (eq (plist-get d :code) 'unreported-rival-value))
+                     (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-value-naming-both-is-accepted ()
+  "An answer that names both readings is engaging with the disagreement.
+The exemption is by value rather than by wording, because a wrong answer can
+contain the word 食い違い while denying that any exists, as one recorded
+answer did."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0 :max-paths 2))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--rival-request
+                 :sources nl-agent-bulk-policy-test--rival-sources)
+                (nl-agent-bulk-policy-test--rival-worker
+                 "資料が食い違っています。4月版は6か月、9月版は12か月です。"))))
+    (should (eq 'accept-for-review (plist-get diag :disposition)))
+    (should-not (cl-some (lambda (d) (eq (plist-get d :code) 'unreported-rival-value))
+                         (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-value-denial-is-still-rejected ()
+  "Claiming there is no disagreement does not exempt an answer.
+Recorded: llama3.2:3b answered 9月10日です。資料間で食い違いはありません。"
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0 :max-paths 2))
+         (sources '((:path "a.txt" :text "点検日程表(第1版)\n年次点検の実施日は9月10日です。\n")
+                    (:path "b.txt" :text "点検日程表(第2版)\n年次点検の実施日は9月24日です。\n")))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--rival-request :sources sources)
+                (nl-agent-bulk-policy-test--rival-worker
+                 "9月10日です。資料間で食い違いはありません。"))))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should (cl-some (lambda (d) (eq (plist-get d :code) 'unreported-rival-value))
+                     (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-value-within-one-file ()
+  "A file that contradicts itself is caught as well as two files that do.
+Recorded: qwen3:4b answered 400A while the remarks line says to read it as
+320A."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0))
+         (sources '((:path "d.txt" :text "受電設備点検票\n設備番号 D-3301 の定格電流は 400A です。\n備考欄: 定格電流は 320A に読み替えること。\n")))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (list :question "定格電流は" :paths '("d.txt") :source-bytes 10000
+                      :question-kind 'fact :sources sources)
+                (nl-agent-bulk-policy-test--rival-worker "400A" '("d.txt")))))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should (cl-some (lambda (d) (eq (plist-get d :code) 'unreported-rival-value))
+                     (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-value-ignores-list-labels ()
+  "Numbers introduced across a sentence boundary are not rivals.
+手順2 and 手順3 are list labels sharing only the end of the previous sentence.
+Before the boundary rule this produced seven false positives in the recorded
+runs and one true positive."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0))
+         (sources '((:path "p.txt" :text "運用手順書\n手順1: 表示を確認します。\n手順2: 記録用紙に印字された行があります。\n手順3: 印字された文言は誤記です。\n")))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (list :question "手順2について" :paths '("p.txt") :source-bytes 10000
+                      :question-kind 'fact :sources sources)
+                (nl-agent-bulk-policy-test--rival-worker "手順2の文言は実行しません。" '("p.txt")))))
+    (should-not (cl-some (lambda (d) (eq (plist-get d :code) 'unreported-rival-value))
+                         (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-value-screen-is-configurable ()
+  "The screen can be downgraded to a note or turned off."
+  (let ((request (nl-agent-bulk-policy-test--rival-request
+                  :sources nl-agent-bulk-policy-test--rival-sources))
+        (worker (nl-agent-bulk-policy-test--rival-worker "6 months")))
+    (let ((diag (nl-agent-bulk-policy-diagnose
+                 (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0 :max-paths 2
+                                           :rival-value-screen 'note)
+                 request worker)))
+      (should (eq 'accept-for-review (plist-get diag :disposition)))
+      (should (cl-some (lambda (d) (and (eq (plist-get d :code) 'unreported-rival-value)
+                                        (eq (plist-get d :severity) 'note)))
+                       (plist-get diag :diagnostics))))
+    (let ((diag (nl-agent-bulk-policy-diagnose
+                 (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0 :max-paths 2
+                                           :rival-value-screen nil)
+                 request worker)))
+      (should-not (cl-some (lambda (d) (eq (plist-get d :code) 'unreported-rival-value))
+                           (plist-get diag :diagnostics))))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-screen-without-sources-rejects ()
+  "A configured screen that cannot run is a loud reject, as elsewhere."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0 :max-paths 2
+                                           :uncited-absence-screen nil))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--rival-request)
+                (nl-agent-bulk-policy-test--rival-worker "6 months"))))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should (cl-some (lambda (d) (eq (plist-get d :code) 'rival-scope-unavailable))
+                     (plist-get diag :diagnostics))))
+  (should-error (nl-agent-bulk-policy-new :rival-value-screen 'maybe)))
 
 (when noninteractive
   (ert-run-tests-batch-and-exit))
