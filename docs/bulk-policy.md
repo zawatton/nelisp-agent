@@ -340,11 +340,42 @@ looked.
 corpus that exercises the screen through the policy rather than against it
 directly. Two maintenance records give different fuel-tank capacities and the
 question asks for the capacity plainly, so a host classifies it `fact` and the
-policy admits it. The exercise arm then routes it, the screen rejects, the
-bounded fallback runs and the final answer comes from the direct read. Every
-other contradiction in the corpora belongs to a kind the policy refuses before
-the screen is reached, so without this case the screen had never been shown
-doing the job it was built for.
+policy admits it. Every other contradiction in the corpora belongs to a kind
+the policy refuses before the screen is reached.
+
+### The fixture had to be asymmetric before a model would fail on it
+
+The case was first written with two undated records that say nothing about
+each other. Live, **both** workers answered 「500L or 750L」, citing both
+files — so the screen's exemption applied and nothing fired. That is the
+exemption behaving correctly, but it left the rejection path unobserved: with
+nothing to prefer, listing both values is the natural answer and there is no
+silent resolution to catch.
+
+Maintenance records carry dates, so the fixture was given them: a routine
+record from March, and an unscheduled one from August taken after a tank
+refit. Re-run with `qwen3:4b`, artifact
+`target/bulk-policy/live-routed-dated-qwen3-4b-20260920-080408/`:
+
+| | |
+| --- | --- |
+| Worker answer | 「500L」, citing only the March record |
+| Diagnostics | `partial-source-coverage`, **`unreported-rival-value`** |
+| Disposition | reject |
+| Fallback | used, final path direct |
+| Final answer | 「2026年8月22日に750L、2026年3月10日に500Lと記録されています。どちらが正しいかは不明です。」 |
+
+The worker took the **older** value and never mentioned the newer one or the
+disagreement. It did not reason that the later record supersedes and then
+report that; it simply answered from the first file. Left alone that answer
+would have been final and wrong. The screen rejected it and the fallback
+produced an answer that names both values and says which is correct is
+unknown.
+
+That is the first end-to-end demonstration on a real model of the failure the
+screen exists for. It also says something about fixtures: the symmetric
+version was well-formed and measured nothing, because a case only tests a
+guard if it can produce the behaviour the guard is meant to catch.
 
 The 86 answers come from 14 distinct cases repeated across runs, so on their
 own the zero false positives would be a weaker result than the number
