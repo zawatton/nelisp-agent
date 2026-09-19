@@ -69,6 +69,17 @@ The list is a policy slot, not a constant in the check, so a host may widen or
 narrow it. Narrowing it re-enables a class of request that has been observed
 to fail with valid citations; that is the host's decision to make explicitly.
 
+### What the request must carry
+
+Beyond `:question`, `:paths` and `:source-bytes`, a request may declare
+`:question-kind`, which admission needs, and `:sources`, a list of
+`(:path :text ...)` entries holding the snapshot the host already read. The
+module never touches the filesystem: everything it inspects is passed in.
+`:sources` is what lets the absence screen look past the excerpts the worker
+cited, and with `uncited-absence-screen` enabled a request that omits it is
+rejected with `absence-scope-unavailable` rather than quietly skipping the
+check.
+
 `require-question-kind` is separate and defaults to on: a request that
 declares no kind is routed direct with reason `question-kind-unknown` instead
 of being treated as an ordinary factual question. A host that has no
@@ -99,9 +110,34 @@ answer is not usable without fallback or human correction.
   - Indicates the worker did not read all supplied sources.
 
 **`absence-marker-conflict`** (severity: reject)
-  - A reference text contains an absence marker (e.g., "記載されていません")
-    but the request was not marked as absent-answer.
-  - Indicates the answer contradicts the source evidence.
+  - A **cited** reference contains an absence marker (e.g. 記載されていません)
+    while `not-found` is nil and the answer does not itself report an absence.
+  - Indicates the answer contradicts the evidence the worker chose to cite.
+  - The answer-side condition is what keeps a *correct* absence answer from
+    being rejected: such an answer necessarily cites the line stating the
+    absence, and it agrees with that line rather than contradicting it.
+
+**`uncited-absence-marker`** (severity: `uncited-absence-screen`, default reject)
+  - No cited reference contains a marker, but one of the request's `:sources`
+    does, while `not-found` is nil and the answer reports no absence.
+  - Exists because the cited-excerpt check above can be evaded by citing
+    narrowly, which a worker was observed doing: see the worker comparison
+    below. The host already holds the snapshot, so the screen looks at the
+    requested sources rather than only at what the worker pointed to.
+  - Its false-positive mode is wider than the cited check: an absence
+    statement anywhere in the bounded working set fires it, even one about a
+    field the question did not ask for. The cost of a false positive is one
+    fallback and a correct answer; the cost of a false negative is a wrong
+    answer presented as final. The default is `reject` for that reason, and
+    `note` or nil are available for hosts that judge the trade differently.
+
+**`absence-scope-unavailable`** (severity: reject)
+  - `uncited-absence-screen` is enabled but the request supplied no
+    `:sources`, so a configured check cannot run.
+  - A configured safety check that silently does nothing is the failure mode
+    this whole document keeps finding, so this is a loud reject rather than a
+    skip. A host that does not want to pass sources sets
+    `uncited-absence-screen` to nil and says so explicitly.
 
 **`unsupported-numeral`** (severity: note or reject, configurable)
   - The answer contains a numeral (run of [0-9]) that does not appear in any reference.
@@ -131,9 +167,9 @@ Both shapes are now refused at admission rather than screened: see
 "Question kinds refused by policy" above. A host that narrows
 `excluded-question-kinds` re-admits a class of request observed to fail while
 citing valid sources, and no diagnostic below will catch it.
-`absence-marker-conflict` also fires on a *correct* absence answer,
-because such an answer cites the excerpt that states the absence; that false
-positive is conservative and costs a fallback, not a wrong answer.
+The absence screens no longer fire on a *correct* absence answer: an answer
+that itself reports the absence is exempt, since it agrees with the cited line
+rather than contradicting it.
 
 ## Fallback and bounded attempts
 
@@ -461,12 +497,35 @@ mechanism produced false positives in the other direction:
   `absence-marker-conflict` fires on `absent-field` in both runs.
 
 **These diagnostics screen citation shape, not answer quality**, and citation
-shape correlates imperfectly with quality in both directions. One concrete
-improvement follows from the failure above and is *not* implemented: the host
-holds the full source snapshot, so an absence-marker check could scan the
-requested sources rather than only the excerpts the worker chose to cite.
-That would have caught this run's miss. Until it exists, a narrower citation
-is a way past the screen.
+shape correlates imperfectly with quality in both directions.
+
+### The absence screen was widened in response, and replayed against both runs
+
+The absence check now has two codes and an answer-side condition:
+`absence-marker-conflict` for a marker in a cited excerpt,
+`uncited-absence-marker` for a marker present in the request's `:sources` but
+not in any cited excerpt, and both exempt an answer that itself reports an
+absence. Replaying the two recorded reports through the current diagnostics
+gives:
+
+| Case | `llama3.2:3b`, before | `llama3.2:3b`, now | `hermes3:8b`, before | `hermes3:8b`, now |
+| --- | --- | --- | --- | --- |
+| absent-answer | reject | reject, `absence-marker-conflict` | **accepted, wrong answer final** | **reject, `uncited-absence-marker`** |
+| absent-field | reject, false positive | **accept** | reject, false positive | **accept** |
+
+The miss is closed and the false positive is gone, on both runs, measured
+against the recorded model output rather than against fixtures written
+afterwards. The replay forced every case through the diagnostics with a
+permissive policy; under the default policy three of the nine are refused at
+admission and never diagnosed at all.
+
+Two things this did **not** fix. `partial-source-coverage` still rejects
+`hermes3:8b`'s correct two-fact answer on `multi-file-negation`, because that
+answer cited one file: coverage counting measures citation completeness and
+nothing here changed that. And an answer that reports the absence *and then
+supplies a value anyway* is exempt from both absence codes, because the
+exemption is literal; no such answer has been observed, and inventing a
+sharper rule without a case to test it against would be guesswork.
 
 ### The worker model does not change the byte economics
 

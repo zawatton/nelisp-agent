@@ -298,7 +298,10 @@ they cost without doubling the model calls.  The replay is reported as
          ;; rather than relying on a diagnostic that cannot see those shapes.
          (request (list :question question :paths paths
                         :source-bytes source-bytes
-                        :question-kind kind))
+                        :question-kind kind
+                        ;; The host already holds the snapshot, so the absence
+                        ;; screen can look past the excerpts the worker cited.
+                        :sources sources))
          (outcomes
           (list :direct
                 (list :status direct-status

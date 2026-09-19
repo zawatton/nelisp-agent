@@ -79,7 +79,8 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 100)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact
+                     :sources ((:path "file.txt" :text "line\n")))
                    :direct (lambda () '(:status usable :answer "direct"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -150,7 +151,8 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 100 :fallback t)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact
+                     :sources ((:path "file.txt" :text "line\n")))
                    :direct (lambda () '(:status usable :answer "direct answer"
                                        :request-content-utf8-bytes 500
                                        :output-utf8-bytes 100
@@ -380,7 +382,8 @@ Returns a fixture with :metrics as a nested plist."
   (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in)))
     (let ((result (nl-agent-bulk-policy-resolve
                    policy
-                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact)
+                   '(:question "test" :paths ("file.txt") :source-bytes 10000 :question-kind fact
+                     :sources ((:path "file.txt" :text "line\n")))
                    :direct (lambda () '(:status usable :answer "answer"
                                        :request-content-utf8-bytes 100
                                        :output-utf8-bytes 50
@@ -640,6 +643,140 @@ Returns a fixture with :metrics as a nested plist."
     (should-error (nl-agent-bulk-policy-admit
                    policy '(:question "q" :paths ("a.txt") :source-bytes 10
                             :question-kind "conflict")))))
+
+;; Tests 36-42: absence screening beyond the cited excerpts.
+;;
+;; The worker comparison in docs/bulk-policy.md showed the cited-excerpt check
+;; being evaded by a narrower citation, and rejecting correct absence answers
+;; because a correct answer necessarily cites the line stating the absence.
+;; These tests pin both directions with the observed fixtures.
+
+(defconst nl-agent-bulk-policy-test--absence-source
+  '((:path "absent.txt"
+     :text "代表メモ\n代表電話は 06-1234-5678 です。\n携帯電話番号はこの資料には記載されていません。\n"))
+  "The source snapshot for the absence fixtures, as the host reads it.")
+
+(defun nl-agent-bulk-policy-test--absence-request (&rest extra)
+  "An absence-question request, with EXTRA appended to the plist."
+  (append (list :question "携帯電話番号を答えてください"
+                :paths '("absent.txt") :source-bytes 10000 :question-kind 'fact)
+          extra))
+
+(defun nl-agent-bulk-policy-test--absence-worker (answer cited-text)
+  "A worker result answering ANSWER while citing CITED-TEXT."
+  (nl-agent-bulk-policy-test--make-worker-fixture
+   200 100 2.0
+   :status 'needs-review :answer answer
+   :references (list (list :path "absent.txt" :start-line 2 :end-line 3
+                           :sha256 (make-string 64 ?a) :text cited-text))))
+
+(ert-deftest nl-agent-bulk-policy-test-absence-conflict-still-caught-when-cited ()
+  "The observed baseline failure: the worker cites the absence and denies it."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--absence-request
+                 :sources nl-agent-bulk-policy-test--absence-source)
+                (nl-agent-bulk-policy-test--absence-worker
+                 "06-1234-5678です。"
+                 "代表電話は 06-1234-5678 です。\n携帯電話番号はこの資料には記載されていません。"))))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should (cl-some (lambda (d) (eq (plist-get d :code) 'absence-marker-conflict))
+                     (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-absence-conflict-caught-when-cited-narrowly ()
+  "The observed worker-comparison miss: a narrower citation must not evade it.
+The answer denies an absence the sources state, but the cited excerpt omits the
+line that states it, so only the source-wide screen can see the conflict."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--absence-request
+                 :sources nl-agent-bulk-policy-test--absence-source)
+                (nl-agent-bulk-policy-test--absence-worker
+                 "代表電話の 06-1234-5678 が責任者の携帯電話番号です。"
+                 "代表電話は 06-1234-5678 です。"))))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should (cl-some (lambda (d) (eq (plist-get d :code) 'uncited-absence-marker))
+                     (plist-get diag :diagnostics)))
+    (should-not (cl-some (lambda (d) (eq (plist-get d :code) 'absence-marker-conflict))
+                         (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-correct-absence-answer-is-not-rejected ()
+  "A correct absence answer cites the absence line and must not be rejected.
+This removes the false positive both live runs produced on absent-field."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--absence-request
+                 :sources nl-agent-bulk-policy-test--absence-source)
+                (nl-agent-bulk-policy-test--absence-worker
+                 "携帯電話番号はこの資料には記載されていません。"
+                 "携帯電話番号はこの資料には記載されていません。"))))
+    (should (eq 'accept-for-review (plist-get diag :disposition)))
+    (should-not (cl-some (lambda (d) (memq (plist-get d :code)
+                                           '(absence-marker-conflict
+                                             uncited-absence-marker)))
+                         (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-uncited-absence-screen-can-be-a-note ()
+  "A host may downgrade the source-wide screen without turning it off."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0
+                                           :uncited-absence-screen 'note))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--absence-request
+                 :sources nl-agent-bulk-policy-test--absence-source)
+                (nl-agent-bulk-policy-test--absence-worker
+                 "代表電話の 06-1234-5678 が責任者の携帯電話番号です。"
+                 "代表電話は 06-1234-5678 です。"))))
+    (should (eq 'accept-for-review (plist-get diag :disposition)))
+    (should (cl-some (lambda (d) (and (eq (plist-get d :code) 'uncited-absence-marker)
+                                      (eq (plist-get d :severity) 'note)))
+                     (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-uncited-absence-screen-off-is-explicit ()
+  "Turning the screen off is a configuration choice, and then nothing fires."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0
+                                           :uncited-absence-screen nil))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--absence-request)
+                (nl-agent-bulk-policy-test--absence-worker
+                 "代表電話の 06-1234-5678 が責任者の携帯電話番号です。"
+                 "代表電話は 06-1234-5678 です。"))))
+    (should (eq 'accept-for-review (plist-get diag :disposition)))
+    (should-not (cl-some (lambda (d) (memq (plist-get d :code)
+                                           '(uncited-absence-marker
+                                             absence-scope-unavailable)))
+                         (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-enabled-screen-without-sources-rejects ()
+  "A configured check that cannot run is a loud reject, never a silent skip."
+  (let* ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0))
+         (diag (nl-agent-bulk-policy-diagnose
+                policy
+                (nl-agent-bulk-policy-test--absence-request)
+                (nl-agent-bulk-policy-test--absence-worker
+                 "代表電話の 06-1234-5678 が責任者の携帯電話番号です。"
+                 "代表電話は 06-1234-5678 です。"))))
+    (should (eq 'reject (plist-get diag :disposition)))
+    (should (cl-some (lambda (d) (eq (plist-get d :code) 'absence-scope-unavailable))
+                     (plist-get diag :diagnostics)))))
+
+(ert-deftest nl-agent-bulk-policy-test-sources-and-screen-validation ()
+  "The new option and the new request key are validated strictly."
+  (should-error (nl-agent-bulk-policy-new :uncited-absence-screen 'maybe))
+  (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in :min-source-bytes 0)))
+    (should-error (nl-agent-bulk-policy-admit
+                   policy (nl-agent-bulk-policy-test--absence-request
+                           :sources "not-a-list")))
+    (should-error (nl-agent-bulk-policy-admit
+                   policy (nl-agent-bulk-policy-test--absence-request
+                           :sources '((:path "a.txt")))))
+    (should-error (nl-agent-bulk-policy-admit
+                   policy (nl-agent-bulk-policy-test--absence-request
+                           :sources '((:path "" :text "x")))))))
 
 (when noninteractive
   (ert-run-tests-batch-and-exit))

@@ -32,7 +32,8 @@ question, not a claim that the class has been made safe.  See
 
 (cl-defstruct (nl-agent-bulk-policy (:constructor nl-agent-bulk-policy--make))
   mode min-source-bytes max-paths max-question-bytes fallback absence-markers
-  numeral-screen excluded-question-kinds require-question-kind)
+  numeral-screen excluded-question-kinds require-question-kind
+  uncited-absence-screen)
 
 (defun nl-agent-bulk-policy--validate-keys (keys allowed where)
   (unless (and (listp keys) (proper-list-p keys) (= 0 (% (length keys) 2)))
@@ -53,10 +54,12 @@ question, not a claim that the class has been made safe.  See
         (numeral-screen 'note)
         (excluded-question-kinds
          (copy-sequence nl-agent-bulk-policy-default-excluded-question-kinds))
-        (require-question-kind t))
+        (require-question-kind t)
+        (uncited-absence-screen 'reject))
     (nl-agent-bulk-policy--validate-keys keys
       '(:mode :min-source-bytes :max-paths :max-question-bytes :fallback :absence-markers
-        :numeral-screen :excluded-question-kinds :require-question-kind)
+        :numeral-screen :excluded-question-kinds :require-question-kind
+        :uncited-absence-screen)
       "nl-agent-bulk-policy-new")
     (while keys
       (pcase (pop keys)
@@ -68,7 +71,8 @@ question, not a claim that the class has been made safe.  See
         (:absence-markers (setq absence-markers (pop keys)))
         (:numeral-screen (setq numeral-screen (pop keys)))
         (:excluded-question-kinds (setq excluded-question-kinds (pop keys)))
-        (:require-question-kind (setq require-question-kind (pop keys)))))
+        (:require-question-kind (setq require-question-kind (pop keys)))
+        (:uncited-absence-screen (setq uncited-absence-screen (pop keys)))))
     (unless (memq mode '(direct-only opt-in)) (error "mode must be direct-only or opt-in, got %S" mode))
     (unless (and (integerp min-source-bytes) (>= min-source-bytes 0) (<= min-source-bytes 131072))
       (error "min-source-bytes must be 0..131072, got %S" min-source-bytes))
@@ -92,11 +96,14 @@ question, not a claim that the class has been made safe.  See
     (setq excluded-question-kinds (copy-sequence excluded-question-kinds))
     (unless (or (null require-question-kind) (eq require-question-kind t))
       (error "require-question-kind must be t or nil, got %S" require-question-kind))
+    (unless (memq uncited-absence-screen '(reject note nil))
+      (error "uncited-absence-screen must be reject, note or nil, got %S" uncited-absence-screen))
     (nl-agent-bulk-policy--make :mode mode :min-source-bytes min-source-bytes :max-paths max-paths
                                  :max-question-bytes max-question-bytes :fallback fallback
                                  :absence-markers absence-markers :numeral-screen numeral-screen
                                  :excluded-question-kinds excluded-question-kinds
-                                 :require-question-kind require-question-kind)))
+                                 :require-question-kind require-question-kind
+                                 :uncited-absence-screen uncited-absence-screen)))
 
 (defun nl-agent-bulk-policy--validate-request (request)
   (unless (and (listp request) (proper-list-p request)) (error "request must be a proper list"))
@@ -104,7 +111,7 @@ question, not a claim that the class has been made safe.  See
     (unless (= (% (length keys) 2) 0) (error "request must have even number of elements"))
     (while keys
       (let ((key (pop keys)))
-        (unless (memq key '(:question :paths :source-bytes :question-kind))
+        (unless (memq key '(:question :paths :source-bytes :question-kind :sources))
           (error "request has unexpected key %S" key))
         (when (memq key seen) (error "request has duplicate key %S" key))
         (push key seen) (pop keys)))
@@ -129,6 +136,18 @@ question, not a claim that the class has been made safe.  See
   (let ((bytes (plist-get request :source-bytes)))
     (unless (and (integerp bytes) (>= bytes 0))
       (error "request :source-bytes must be non-negative integer, got %S" bytes)))
+  ;; Optional snapshot of the requested sources, supplied by the host so the
+  ;; absence screen can look beyond the excerpts the worker chose to cite.  The
+  ;; module never reads the filesystem: whatever it inspects is passed in.
+  (let ((sources (plist-get request :sources)))
+    (unless (or (null sources) (proper-list-p sources))
+      (error "request :sources must be a proper list or nil, got %S" sources))
+    (dolist (source sources)
+      (unless (and (listp source) (proper-list-p source)
+                   (stringp (plist-get source :path))
+                   (not (string-empty-p (plist-get source :path)))
+                   (stringp (plist-get source :text)))
+        (error "request :sources entries need string :path and :text, got %S" source))))
   request)
 
 ;;;###autoload
@@ -181,6 +200,18 @@ the class has been made safe."
                             (nl-agent-bulk-policy-min-source-bytes policy))))
      (t (list :path 'delegated :reason 'admitted :detail "Admitted for delegation")))))
 
+(defun nl-agent-bulk-policy--absence-reported-p (policy text)
+  "Return non-nil when TEXT itself reports an absence under POLICY's markers.
+
+An answer that says the value is not recorded is agreeing with a source that
+says so, not contradicting it, so the absence screens exempt it.  The exemption
+is deliberately literal: an answer that reports the absence and then supplies a
+value anyway is exempt too, which is a known limitation recorded in
+`docs/bulk-policy.md'."
+  (and (stringp text)
+       (cl-some (lambda (marker) (string-match-p marker text))
+                (nl-agent-bulk-policy-absence-markers policy))))
+
 (defun nl-agent-bulk-policy--normalize-fullwidth-digits (text)
   "Convert fullwidth digits to ASCII."
   (dolist (pair '(("０" "0") ("１" "1") ("２" "2") ("３" "3") ("４" "4")
@@ -219,7 +250,8 @@ the class has been made safe."
       (progn (push (list :code 'worker-failed :severity 'reject :detail "Worker failed") diagnostics)
              (setq disposition 'reject))
       (let ((answer (plist-get result :answer)) (references (plist-get result :references))
-            (not-found (plist-get result :not-found)) (paths (plist-get request :paths)))
+            (not-found (plist-get result :not-found)) (paths (plist-get request :paths))
+            (sources (plist-get request :sources)))
         (unless (and (stringp answer) (not (string-empty-p answer)))
           (push (list :code 'malformed-result :severity 'reject :detail "Answer is not a non-empty string") diagnostics)
           (setq disposition 'reject))
@@ -260,16 +292,48 @@ the class has been made safe."
               (push (list :code 'partial-source-coverage :severity 'reject
                           :detail (format "Uncovered paths: %s" (string-join uncovered ", "))) diagnostics)
               (setq disposition 'reject))))
-        (when (not not-found)
-          (dolist (ref references)
-            (let ((ref-text (plist-get ref :text)))
-              (dolist (marker (nl-agent-bulk-policy-absence-markers policy))
-                (when (string-match-p marker ref-text)
-                  (push (list :code 'absence-marker-conflict :severity 'reject
-                              :detail (format "Reference %s:%d-%d contains marker: %s"
-                                              (plist-get ref :path) (plist-get ref :start-line)
-                                              (plist-get ref :end-line) marker)) diagnostics)
-                  (setq disposition 'reject))))))
+        ;; Absence screening.  An answer that itself reports an absence agrees
+        ;; with the source and is not in conflict with it, so it is exempt: that
+        ;; is what stops a correct absence answer from being rejected for citing
+        ;; the very line that states the absence.
+        (when (and (not not-found)
+                   (stringp answer)
+                   (not (nl-agent-bulk-policy--absence-reported-p policy answer)))
+          (let ((cited nil))
+            (dolist (ref references)
+              (let ((ref-text (plist-get ref :text)))
+                (dolist (marker (nl-agent-bulk-policy-absence-markers policy))
+                  (when (and (stringp ref-text) (string-match-p marker ref-text))
+                    (setq cited t)
+                    (push (list :code 'absence-marker-conflict :severity 'reject
+                                :detail (format "Reference %s:%d-%d contains marker: %s"
+                                                (plist-get ref :path) (plist-get ref :start-line)
+                                                (plist-get ref :end-line) marker)) diagnostics)
+                    (setq disposition 'reject)))))
+            ;; A worker can evade the check above by citing narrowly, which was
+            ;; observed: see docs/bulk-policy.md, worker comparison.  When the
+            ;; screen is enabled the requested sources are scanned too, and a
+            ;; policy configured for a check it cannot perform is a reject
+            ;; rather than a silent skip.
+            (let ((screen (nl-agent-bulk-policy-uncited-absence-screen policy)))
+              (when (and screen (not cited))
+                (if (null sources)
+                    (progn
+                      (push (list :code 'absence-scope-unavailable :severity 'reject
+                                  :detail "uncited-absence-screen is enabled but the request supplied no :sources")
+                            diagnostics)
+                      (setq disposition 'reject))
+                  (catch 'nl-agent-bulk-policy--found
+                    (dolist (source sources)
+                      (let ((text (plist-get source :text)))
+                        (dolist (marker (nl-agent-bulk-policy-absence-markers policy))
+                          (when (and (stringp text) (string-match-p marker text))
+                            (push (list :code 'uncited-absence-marker :severity screen
+                                        :detail (format "Source %s states an absence the answer does not report: %s"
+                                                        (plist-get source :path) marker))
+                                  diagnostics)
+                            (when (eq screen 'reject) (setq disposition 'reject))
+                            (throw 'nl-agent-bulk-policy--found t)))))))))))
         (let ((unsupported (nl-agent-bulk-policy--unsupported-numerals answer references
                                                                         (nl-agent-bulk-policy-absence-markers policy))))
           (when unsupported
