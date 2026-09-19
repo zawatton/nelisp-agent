@@ -45,7 +45,9 @@ EMACS_TESTS += semantic-repair-test.el
 EMACS_TESTS += semantic-faithfulness-test.el
 EMACS_TESTS += semantic-eval-test.el
 EMACS_TESTS += bulk-reader-test.el
+EMACS_TESTS += bulk-policy-test.el
 EMACS_TESTS += bulk-eval-test.el
+EMACS_TESTS += bulk-policy-eval-test.el
 NELISP_TESTS = $(SHARED_TESTS)
 LISP = lisp/nl-agent-wire.el lisp/nl-agent-startup.el \
 	lisp/nl-agent-service.el lisp/nl-agent-stdio.el lisp/nl-agent-config.el \
@@ -69,24 +71,32 @@ LISP = lisp/nl-agent-wire.el lisp/nl-agent-startup.el \
 	lisp/nl-agent-semantic-render.el \
 	lisp/nl-agent-semantic-eval.el \
 	lisp/nl-agent-bulk-reader.el \
+	lisp/nl-agent-bulk-policy.el \
 	examples/free-models-config.el examples/free-models-host.el \
 	examples/evaluate-native-tasks.el examples/bench-stdio-encoding.el \
 	examples/semantic-render-example.el \
 	examples/evaluate-semantic-render.el
 
 LISP += examples/evaluate-bulk-reader.el
+LISP += examples/evaluate-bulk-policy.el
 
 .PHONY: test test-emacs test-nelisp test-stdio test-cli test-http test-ui test-task-eval \
 	test-cli-jsonl test-cli-jsonl-approval test-cli-jsonl-service \
 	test-task-promotion test-task-promotion-config test-task-promotion-service \
 	test-improvement-evaluation test-training-task-promotion test-recurrent-config \
 	test-semantic-eval \
-	test-supervised-resume test-semantic-ir test-semantic-render compile check
+	test-supervised-resume test-semantic-ir test-semantic-render test-bulk-policy test-bulk-policy-eval compile check
 
 .PHONY: test-bulk-reader
 
 test-bulk-reader:
 	@$(MAKE) test-emacs EMACS_TESTS='bulk-reader-test.el bulk-eval-test.el local-tools-test.el'
+
+test-bulk-policy:
+	@$(MAKE) test-emacs EMACS_TESTS='bulk-policy-test.el'
+
+test-bulk-policy-eval:
+	@$(MAKE) test-emacs EMACS_TESTS='bulk-policy-eval-test.el'
 
 test: test-emacs test-nelisp test-stdio test-cli compile
 
