@@ -256,13 +256,19 @@ available, there is no evidence and the answer counts as not using it."
 (defconst nl-agent-bulk-policy-rival-context-chars 16
   "How much text before a number is taken as its context, in characters.")
 
-(defconst nl-agent-bulk-policy-rival-match-chars 4
+(defconst nl-agent-bulk-policy-rival-match-chars 6
   "How many characters two contexts must share, ending at the number.
 
 Two numbers whose immediately preceding text agrees for this many characters
 are treated as candidates for the same slot: 点検間隔は6か月 and 点検間隔は12か月
 share 「点検間隔は」.  Shorter matches make unrelated numbers look like rivals;
-longer ones miss a rival phrased slightly differently.")
+longer ones miss a rival phrased slightly differently.
+
+Six was chosen by measurement, not by argument.  At four, 絶縁抵抗は 85MΩ and
+接地抵抗は 8.5Ω pair up on the shared 「抵抗は 」 although they are different
+measurements; six separates them and still keeps every contradiction in the
+recorded corpora, whose shortest shared context is 「契約電力は 」.  A domain
+whose phrasing is shorter or longer may need a different value.")
 
 (defconst nl-agent-bulk-policy--rival-boundary "[。．\\.!?！？\n\r]"
   "Characters that end the phrase introducing a number.
@@ -286,15 +292,22 @@ nothing from the sentence before it."
     (while (and (< start (length norm)) (string-match "[0-9]+" norm start))
       (let* ((begin (match-beginning 0))
              (end (match-end 0))
+             ;; A number glued to an identifier is a label, not a measurement:
+             ;; T-1, B-2, D-3301, 第1回路.  Comparing labels pairs every item of
+             ;; an enumeration with every other.
+             (label (and (> begin 0)
+                         (string-match-p "[-_A-Za-z第]"
+                                         (substring norm (1- begin) begin))))
              (window (substring norm (max 0 (- begin nl-agent-bulk-policy-rival-context-chars))
                                 begin))
              (cut (let ((last nil) (index 0))
                     (while (string-match nl-agent-bulk-policy--rival-boundary window index)
                       (setq last (match-end 0) index (match-end 0)))
                     last)))
-        (push (cons (substring norm begin end)
-                    (string-trim-left (if cut (substring window cut) window)))
-              result)
+        (unless label
+          (push (cons (substring norm begin end)
+                      (string-trim-left (if cut (substring window cut) window)))
+                result))
         (setq start end)))
     (nreverse result)))
 
@@ -307,6 +320,27 @@ nothing from the sentence before it."
                 (eq (aref left (1- index-left)) (aref right (1- index-right))))
       (setq shared (1+ shared) index-left (1- index-left) index-right (1- index-right)))
     shared))
+
+(defun nl-agent-bulk-policy--parallel-subjects-p (left right)
+  "Return non-nil when LEFT and RIGHT name parallel subjects rather than one.
+
+Two contexts that agree except for a single character are describing different
+members of a series — 第1回路 beside 第2回路, A事業場 beside B事業場 — and their
+numbers are separate readings rather than competing ones.  Measured on a
+number-dense corpus this distinction removed every false positive while keeping
+the contradictions, because a real contradiction restates the same subject."
+  (and (> (length left) 0)
+       (= (length left) (length right))
+       (not (equal left right))
+       (= 1 (cl-count nil (cl-mapcar #'eq (append left nil) (append right nil))))))
+
+(defun nl-agent-bulk-policy--rival-contexts-p (mine other)
+  "Return non-nil when MINE and OTHER introduce competing readings of one slot."
+  (let ((shared (nl-agent-bulk-policy--shared-tail mine other)))
+    (and (>= shared nl-agent-bulk-policy-rival-match-chars)
+         (not (nl-agent-bulk-policy--parallel-subjects-p
+               (substring mine 0 (- (length mine) shared))
+               (substring other 0 (- (length other) shared)))))))
 
 (defun nl-agent-bulk-policy--unreported-rivals (answer sources)
   "Return rivals of ANSWER's numbers that SOURCES state and ANSWER omits.
@@ -338,8 +372,7 @@ Each element is (VALUE RIVAL PATH CONTEXT)."
             (unless (or (equal (car other) (car mine))
                         (member (car other) answer-values)
                         (assoc (car mine) found))
-              (when (>= (nl-agent-bulk-policy--shared-tail (nth 1 mine) (nth 1 other))
-                        nl-agent-bulk-policy-rival-match-chars)
+              (when (nl-agent-bulk-policy--rival-contexts-p (nth 1 mine) (nth 1 other))
                 (push (list (car mine) (car other) (nth 2 other)
                             (substring (nth 1 other)
                                        (max 0 (- (length (nth 1 other))

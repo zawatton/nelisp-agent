@@ -229,26 +229,44 @@ exempts.
 
 ### Calibration
 
-Both thresholds were chosen by running the screen over every recorded live
-report — 86 worker answers — rather than by argument.
+Every rule and threshold here was chosen by running the screen over recorded
+data rather than by argument, against two corpora: the 86 worker answers in
+the recorded live reports, and `examples/bulk-dense-corpus.sexp`, five
+number-dense inspection records fed their own correct answers so that any fire
+is a false positive.
 
-| Version | Fires | True | False |
-| --- | ---: | ---: | ---: |
-| Shared wording only | 8 | 1 | 7 |
-| Plus the sentence-boundary cut | 1 | 1 | 0 |
-| Plus cross-source comparison | **4** | **4** | **0** |
+| Version | Recorded: fires / true / false | Dense: false positives |
+| --- | --- | ---: |
+| Shared wording only | 8 / 1 / 7 | — |
+| Plus the sentence-boundary cut | 1 / 1 / 0 | — |
+| Plus cross-source comparison | 4 / 4 / 0 | 3 of 4 |
+| Plus the identifier and parallel-subject rules | 4 / 4 / 0 | 1 of 4 |
+| Plus a six-character threshold | **4 / 4 / 0** | **0 of 4** |
 
-The seven false positives were all one case: 手順2 and 手順3 are list labels
-whose contexts share only 「。 手順」, the end of the previous sentence. Cutting
-the context at sentence boundaries removed all seven and kept the true
-positive.
+Each step was forced by a failure the previous step produced.
+
+The seven early false positives were all one case: 手順2 and 手順3 are list
+labels whose contexts share only 「。 手順」, the end of the previous sentence.
+Cutting the context at sentence boundaries removed all seven.
 
 The first implementation compared numbers only within a single file, which
 calibration exposed: it found the self-contradicting file and missed both
-cross-file conflicts, which are the commoner shape. Comparing across sources
-raised the count to four, and all four are the conflict answers judged wrong
-by hand: two runs of `conflicting-sources`, plus `conflict-within-file` and
-`conflict-by-date`.
+cross-file conflicts, the commoner shape.
+
+The number-dense corpus then broke it in a way the recorded runs never could,
+because those cases carry few incidental numbers. Three of four correct
+answers were flagged: 絶縁抵抗は 85MΩ against 絶縁抵抗は 120MΩ for a different
+circuit, 定格電流 for two different breakers, an inspection date for two
+different sites. Two rules fixed it. A number glued to an identifier — T-1,
+B-2, D-3301, 第1回路 — is a label rather than a measurement and is skipped
+entirely. And two contexts that agree except for a single character are naming
+parallel subjects, not one subject twice, so their numbers are separate
+readings. A genuine contradiction restates the same subject, which is why
+both rules keep every true positive.
+
+The last false positive was 絶縁抵抗は 85MΩ paired with 接地抵抗は 8.5Ω on the
+four characters 「抵抗は 」. Six characters separates them, and the shortest
+shared context among the real contradictions is 「契約電力は 」, also six.
 
 ### What it does not do
 
@@ -262,9 +280,15 @@ shape of one of those kinds. Its value is elsewhere, on the questions the
 policy does route, where the sources happen to disagree and nothing previously
 looked.
 
-The 86 answers come from 14 distinct cases repeated across runs, so the zero
-false positives is a weaker result than the number suggests. A corpus with
-more incidental numbers would test it harder, and none exists yet.
+The 86 answers come from 14 distinct cases repeated across runs, so on their
+own the zero false positives would be a weaker result than the number
+suggests. That is why `examples/bulk-dense-corpus.sexp` exists: repeated
+measurements, equipment labels, a schedule and an invoice, each fed its own
+correct answer. It broke three of the four rules' worth of the screen when it
+was first run, which is the point of it, and a test keeps it as a regression
+guard. Nine cases of incidental numbers is still not a wide sample, and the
+rules are tuned to Japanese phrasing where a measurement follows a particle;
+another language or a table-shaped source has not been tried.
 
 ## Fallback and bounded attempts
 

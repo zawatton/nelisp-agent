@@ -316,6 +316,39 @@ This covers the wiring: the kind-aware screen must be the one the runner uses."
                 (plist-get (plist-get (plist-get other :direct) :screening)
                            :proxy-status)))))
 
+(defun nl-agent-bulk-policy-eval-test--dense-sources (paths)
+  "Read PATHS from the corpus root as policy `:sources' entries."
+  (let ((root (expand-file-name "examples/bulk-reader-corpus"
+                                nl-agent-example-bulk-policy-root)))
+    (mapcar (lambda (path)
+              (list :path path
+                    :text (with-temp-buffer
+                            (insert-file-contents (expand-file-name path root))
+                            (buffer-string))))
+            paths)))
+
+(ert-deftest bulk-policy-eval-test-rival-screen-on-number-dense-corpus ()
+  "The rival screen must not fire on correct answers in number-dense sources.
+`examples/bulk-dense-corpus.sexp' is an inspection-record corpus: repeated
+measurements, equipment labels, a schedule and an invoice.  Each case's own
+correct answer is fed to the screen, so a fire is a false positive.  Only
+`dense-buried-conflict', which really does contradict itself, may fire.
+
+Without the identifier-label and parallel-subject rules this fired on three of
+the four correct answers, and at a four-character threshold on a fourth."
+  (let* ((corpus (nl-agent-example-bulk-eval-load-corpus
+                  (expand-file-name "examples/bulk-dense-corpus.sexp"
+                                    nl-agent-example-bulk-policy-root)))
+         (fired nil))
+    (should (= 5 (length (plist-get corpus :cases))))
+    (dolist (case (plist-get corpus :cases))
+      (let* ((sources (nl-agent-bulk-policy-eval-test--dense-sources
+                       (plist-get case :paths)))
+             (answer (mapconcat #'identity (plist-get case :required) "。"))
+             (rivals (nl-agent-bulk-policy--unreported-rivals answer sources)))
+        (when rivals (push (plist-get case :id) fired))))
+    (should (equal '("dense-buried-conflict") fired))))
+
 (ert-deftest bulk-policy-eval-test-worker-timeout-override ()
   "The worker timeout defaults to the shipped value and validates overrides.
 A malformed override must signal: a measurement that silently fell back to the
