@@ -1,176 +1,212 @@
-# Development handoff to Claude — 2026-09-19
+# Development handoff to Claude — 2026-09-21
 
 ## Start here
 
 Continue development in `dev/nelisp-agent`, an independent repository in the
 Notes workspace. Read the applicable workspace and `dev/` instructions first.
-Then read this file, [the architecture](nelisp-cloud-local-ai-architecture.org),
-and [the bulk-reader report](bulk-reader.md). Read other files only as needed.
-The architecture was moved here from `dev/nelisp/docs`; use this copy.
+Then read this file and [the bulk delegation policy](bulk-policy.md), whose
+opening section summarises every measurement and names the section that
+establishes it. Read [the architecture](nelisp-cloud-local-ai-architecture.org)
+and [the bulk-reader report](bulk-reader.md) as needed; the architecture was
+moved here from `dev/nelisp/docs`, so use this copy.
 
-The objective is to reduce total cost per validated result by separating
-high-capability reasoning from bounded local execution. A shorter main-model
-context alone does not establish an improvement. Prefer deterministic reads
-and transformations whenever they can do the job.
+The objective is unchanged: reduce total cost per validated result by
+separating high-capability reasoning from bounded local execution. A shorter
+main-model context alone does not establish an improvement. Prefer
+deterministic reads and transformations whenever they can do the job.
 
 Communicate with the user in concise Japanese. Keep repository documentation,
-comments, and docstrings in English. The user requested lightweight models
-(Luna or equivalent) for code implementation, with the lead responsible for
-design, review, and validation. If Luna is unavailable in Claude, use an
-available lightweight implementation model and state the substitution;
-do not claim to have used Luna. Routine implementation decisions and fixes
+comments and docstrings in English. Routine implementation decisions and fixes
 should proceed without repeated confirmation.
 
-## Preserve the current checkout
+## State of the checkout
 
-At handoff, HEAD was `5a837bd` (`Import the existing NeLisp Agent source under
-version control`). These files had uncommitted changes:
+HEAD is `761b1f8` and the tree is clean; `origin/main` matches. The previous
+handoff's three uncommitted files were committed long ago — do not go looking
+for them.
 
-- `docs/bulk-reader.md`
-- `examples/evaluate-bulk-reader.el`
-- `test/bulk-eval-test.el`
+Use source-preferred loading as in the Makefile. A stale `.elc` will silently
+give you an old constant: a measurement script run with `-L lisp` alone read
+`min-source-bytes` as 8192 instead of 3072 and split a table at the wrong
+point. Pass `--eval '(setq load-prefer-newer t)'` in scratch scripts too, and
+read the "newer than byte-compiled file" warning when it appears.
 
-This handoff adds another file. Recheck `git status` and diffs before editing;
-the checkout may have changed since this snapshot. Preserve existing changes.
-Do not assume the repository is still untracked or has no commits.
-
-Local `.elc` files were visible for the evaluation example and its test at
-handoff. Use source-preferred loading as in the Makefile; do not rely on stale
-compiled files or indiscriminately delete generated/user files. Use relative
-paths or environment variables in code and scratch scripts, not machine paths.
+Use relative paths or environment variables in code and scratch scripts, never
+machine paths.
 
 ## Completed work
 
-The previous bulk-reader goal is complete; do not restart it or report it as
-unfinished. Its acceptance criteria were implementation, boundary/failure
-tests, a fixed comparison corpus, an honest comparison report, and docs/logs.
-The experiment was allowed to conclude that delegation was not beneficial.
+The previous handoff's five-item milestone is **complete**. Do not restart it.
 
-| Component | Entry points / documentation | Current contract |
-| --- | --- | --- |
-| Semantic IR | `lisp/nl-agent-semantic-ir.el`, [IR documentation](semantic-ir.md) | Strict parsing and deterministic rendering |
-| Local rendering | `lisp/nl-agent-semantic-render.el`, [rendering](semantic-render.md) | Review-required model output, bounded repair and numeric screening |
-| Rendering evaluation | `lisp/nl-agent-semantic-eval.el`, [evaluation](semantic-evaluation.md) | Fixed corpus, per-attempt byte/time metrics; literal checks are proxies |
-| Bulk reader | `lisp/nl-agent-bulk-reader.el`, [report](bulk-reader.md) | Read-only worker extraction with host-attached excerpts and hashes |
-| Bulk evaluation | `examples/evaluate-bulk-reader.el`, `examples/bulk-reader-corpus.sexp` | Direct and delegated answers on identical questions, with separate main/worker metrics |
+| Item | Where it landed |
+| --- | --- |
+| Frozen cases kept; cases for multiple facts, absence, conflict, quoted instructions | `bulk-policy-corpus.sexp`, `bulk-excluded-corpus.sexp`; the frozen corpus hash is checked on every load |
+| Explicit host-side policy, direct by default, opt-in delegation, recorded reasons | `lisp/nl-agent-bulk-policy.el`, admission rules in fixed order |
+| Schema validity, completeness diagnostics and manual review kept separate | diagnostic codes with per-screen severity; results stay `needs-review` |
+| Explicit bounded fallback recording all costs | fallback and accounting in the policy arms |
+| The changed path compared against direct reads | the canonical evaluation, 20 cases, both arms |
 
-Bulk-reader host entry points are `nl-agent-bulk-reader-new`,
-`nl-agent-bulk-reader-run`, `nl-agent-bulk-reader-read-range`, and
-`nl-agent-bulk-reader-register-tools`. Registered tools are `bulk.read`
-(execute risk because it invokes a model) and `bulk.read-range` (read risk).
-Use the existing permission system for model-originated calls. Registration
-does not grant permission or enable routing.
+Four more corpora were added since: `bulk-dense`, `bulk-table`, `bulk-en`,
+`bulk-nonnumeric` for screen calibration, plus `bulk-sizes` (the size ladder)
+and `bulk-spread` (two facts near and far apart), both of which are now part
+of the canonical evaluation or its tests.
 
-Preserve bounded file access: at most eight files, 64 KiB per file, 128 KiB
-aggregate, strict UTF-8, workspace/path/symlink restrictions. The host validates
-the worker JSON schema and ranges, constructs exact excerpts, and checks hashes
-on re-fetch. Valid references do not prove semantic correctness. Results stay
-`needs-review` with `semantic-validation` set to `unverified`.
+## What the measurements show
 
-The serialized tool result must fit its 3,500-character bound inside the
-runtime's 4,000-character observation boundary. Do not truncate references
-silently or weaken schema validation to accommodate model output. Host APIs
-are trusted entry points; the allowlist is not an OS/network sandbox.
+Read `bulk-policy.md` for the evidence. In brief, and every figure is UTF-8
+bytes of the exact messages sent — no token counts, no prices:
 
-## What the actual experiment showed
+- **Source size decides whether delegation can pay.** Split at
+  `min-source-bytes` (3072, itself measured), the same 20-case run gives
+  main-model input at 144% of a direct read below the threshold — no price
+  ratio recovers that — and 20% at or above it, with a break-even ratio of
+  1.37. The exact crossing point depends on how much the worker quotes back:
+  between 370 B and 1,923 B of source across everything observed.
+- **It does not reduce total work.** Combined input is 1.30× a direct read on
+  large sources and 3.44× on small ones. It pays only when the two models are
+  priced differently.
+- **The usable window has an upper edge set by the worker's context**, not by
+  the arrangement. At the host default of 4096 tokens the window is roughly
+  2 KB to 10 KB; at `OLLAMA_CONTEXT_LENGTH=16384` a 24 KB source was answered
+  correctly at both ends.
+- **Oversized prompts are truncated silently** — a server-side warning and a
+  normal 200. A mildly truncated prompt still answers coherently from an
+  incomplete source, and its citation verifies, because verification reads the
+  file rather than whatever the worker was shown. `:max-request-bytes` exists
+  to refuse before the call; it is unset by default because the right value is
+  the worker's context and this code path cannot ask for it.
+- **Citation discipline, not comprehension, was the cost driver.** Workers
+  answered correctly and padded their citation lists; discarding those results
+  cost the worker *and* the direct read. Repairing them took one worker from
+  two rejections in five to none and its break-even ratio from 4.23 to 1.70.
+- **Two question kinds are refused rather than screened**, on eight examples —
+  with the limit found later that an 8B main model fails those sources
+  directly too. The exclusion avoids paying a worker for an answer that will
+  be wrong either way; it does not buy a right one.
 
-The local main model was `llama3.1:8b`; the worker was `llama3.2:3b` with JSON
-mode. Five synthetic cases ran once in fixed order. Exact settings, model
-digests, review criteria, per-case data, and limitations are in the report.
+Nothing here establishes a production threshold, a cloud saving or a ranking
+of models. Every model measured is small and local. Read "Not measured" before
+quoting any of it.
 
-- Main input: 12,868 to 5,200 UTF-8 message-content bytes, down 59.6%.
-- Worker input: 16,678 bytes; combined input: 21,878 bytes, up 70.0%.
-- Technical failures: 0/5 in both paths. Technical success is not correctness.
-- Delegated answers omitted June 18 in the multi-file case and substituted
-  a general telephone number for a mobile number explicitly absent from the
-  source. Three delegated answers fully satisfied the rubric; two failed.
-- Direct answers fully satisfied four cases; the quoted-instruction case
-  refused execution but supplied only a terse source-line explanation.
-- The large-source case reduced main input by 89.0%, but increased combined
-  input by 18.8% and took longer. Every small case increased main input.
+## Invariants to preserve
 
-Token counts, billing, energy, production accuracy, and a reliable latency
-distribution were not measured. This local experiment does not establish
-cloud savings. Do not describe bytes as tokens or mocked runs as model quality.
+Bounded file access: at most eight files, 64 KiB per file, 128 KiB aggregate,
+strict UTF-8, workspace/path/symlink restrictions. The host validates the
+worker JSON schema and ranges, constructs exact excerpts and checks hashes on
+re-fetch. Valid references do not prove semantic correctness. Results stay
+`needs-review` with `semantic-validation` set to `unverified`. The serialized
+tool result must fit its 3,500-character bound inside the runtime's
+4,000-character observation boundary.
 
-The raw local artifact is
-`target/bulk-reader/comparison-wjl3rZ/report.sexp`; adjacent
-`implementation.sha256` records the measured implementation. Artifacts under
-`target/` may not travel with the checkout; the Markdown report preserves
-the findings. Subsequent runner changes handled unavailable totals for zero
-pairs and suppressed a compilation warning; they do not change this five-pair
-result. The real venue extraction and hash-checked re-fetch were also verified.
+Four rules in the reader were each forced by a measurement and should not be
+relaxed without one:
+
+- A reference that cannot be verified is dropped and counted, **but if none
+  survives and the answer claims a find, the result still fails.** Repairing a
+  wholly invented citation list into a success would invert what this module
+  is for.
+- At most two references per path, and **per path** matters: a global cap drops
+  whole files and turns a correct multi-file answer into a coverage rejection.
+- No reference may span more than half its source, with a floor of 8 lines so
+  the fraction does not reject ordinary citations of small files. A citation
+  covering its file points at nothing and made the delegated prompt 109% of
+  the direct one.
+- The fabrication diagnostic fires only on invented citations, never on the
+  reader's own budgets. Mixing them teaches a host to ignore the code.
+
+Host APIs are trusted entry points; the allowlist is not an OS or network
+sandbox. Registration grants neither permission nor routing.
 
 Current decision: keep bulk reading optional. Do not enable automatic
 delegation by default or label its answers verified.
 
 ## Recommended next milestone
 
-This is the proposed next development scope, not a claim that it already exists:
-add a bounded decision and fallback path that makes optional delegation useful
-without hiding its failures. Start with quality and accounting, not default
-automatic routing or another model integration.
+This is a proposed scope, not a claim that it exists: **measure the regime
+that pays, at the sizes where it pays.**
 
-1. Preserve the existing five cases as regression evidence. Add independent
-   cases for multiple requested facts, explicit absence, conflicting sources,
-   and quoted instructions. Keep expected answers out of model prompts.
-2. Design an explicit host-side policy: direct reads remain the default;
-   delegation requires opt-in and a suitable bounded request. Record why each
-   path was chosen. Do not infer a universal size threshold from one case.
-3. Distinguish schema/reference validity, completeness diagnostics, and manual
-   semantic review. Missing or contradictory evidence must not become verified
-   success. Rule-based diagnostics are useful but not proofs of meaning.
-4. If adding fallback, make it explicit and bounded. Record the failed worker,
-   fallback reason, all input/output volume, elapsed time, and final outcome.
-   Never hide failed delegation by counting only the successful direct call.
-5. Compare the changed path against direct reads using both regression and
-   new cases. Use repeated/order-balanced runs only when making latency claims.
+Every table argues that the larger the source the better delegation looks,
+with `r*` falling towards 1.01 — and the largest source ever measured is
+9.9 KB, because the worker's default context stops there. The asymptote is a
+fit over material no worker in these runs could read. Either it holds and this
+mechanism has a clear home, or it does not and the honest conclusion is that
+the payable window is narrow.
 
-Acceptance: deterministic policy/failure tests pass; the two observed quality
-failures remain visible and are handled by a documented policy; fallback costs
-are included; unknown metrics remain unknown; the report explains whether
-quality and total work improved. A negative result is acceptable. Keep changes
-scoped; do not bundle unrelated runtime or cloud API rewrites.
+1. Raise the worker context deliberately and record how (`OLLAMA_CONTEXT_LENGTH`
+   is a server setting, not a request field) with the memory cost measured, not
+   assumed. Set `:max-request-bytes` to match and check it refuses rather than
+   letting the server cut.
+2. Extend the ladder to roughly 16, 32 and 64 KB, keeping the existing shape:
+   one buried fact, filler carrying no rival values, the fact's depth held
+   constant so size is the only moving variable.
+3. Measure `D`, `M`, `W` and answer correctness at each size, and check whether
+   `M` stays flat as it did to 8.5 KB. If it grows, the asymptote argument
+   fails and the guide should say so.
+4. Watch for silent truncation at every size: compare the server log against
+   the results, and treat a run with a truncation warning as void rather than
+   as data.
+5. Report the crossing point and `r*` per size as the existing tables do, and
+   revise the summary at the top of `bulk-policy.md` rather than appending
+   another section beside a stale claim.
+
+Acceptance: the size ladder extends past 10 KB with every run free of
+truncation warnings; `M`'s behaviour at those sizes is stated from measurement;
+the guide's asymptote claim is either supported or withdrawn. A negative result
+is acceptable and is the point. Keep changes scoped.
+
+Two smaller things worth doing if the above stalls: every main-model
+measurement used a local 8B model, so whether a frontier main clears the
+excluded kinds is unknown and would change the exclusion's rationale; and every
+corpus is synthetic, so a run against real `capture/` material would test
+external validity, subject to the user's decision about their own data.
 
 ## Verification and re-run
 
-From the repository root, with sibling `nelisp-llm` and `nelisp-photon` checkouts:
+From the repository root, with sibling `nelisp-llm` and `nelisp-photon`
+checkouts:
 
 ```sh
-make test-bulk-reader
-make test-semantic-eval
-make compile LISP='lisp/nl-agent-bulk-reader.el examples/evaluate-bulk-reader.el'
+make test-bulk-reader        # 33 ERT tests
+make test-bulk-policy        # 74
+make test-bulk-policy-eval   # 22
+make test-semantic-eval      # 9
+make compile                 # warning-as-error
 ```
 
-Previous verification: 15 reader ERT tests, seven evaluation ERT tests,
-16 local-tools assertions, and 51 semantic-evaluation ERT tests passed.
-Warning-as-error compilation passed. This was focused host-side validation,
-not a claim that the full standalone NeLisp suite or all product flows passed.
+All pass at `761b1f8`, and the frozen corpus hash is
+`13a0c00f4bc1b49afaae896fd678628c98a28a8371712b042cf59d0b375e4f40`. This is
+focused host-side validation, not a claim that the full standalone NeLisp
+suite passed.
 
-The default evaluation is a mocked smoke run. For real local inference, use
-already installed models and a running loopback Ollama service:
+Changes to the reader or the policy should be covered by a mutation run, not
+only by green tests: disable each check in turn and confirm exactly the
+matching test turns red, then restore and verify the module is byte-identical.
+Twenty-nine mutations currently cover these two modules. Two of them found
+gaps in the tests rather than confirming them, which is the point of running
+them.
+
+The default evaluation is a deterministic stub. For real local inference, with
+a running loopback Ollama service:
 
 ```sh
-mkdir -p target/bulk-reader
 NELISP_AGENT_BULK_EVAL_LIVE=1 \
+NELISP_AGENT_BULK_EVAL_WORKER_SELECTOR=local/llama3.2:3b \
+NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT=240 \
 emacs -Q --batch --eval '(setq load-prefer-newer t)' \
-  -l examples/evaluate-bulk-reader.el \
-  -f nl-agent-example-evaluate-bulk-reader-main \
-  -- --output target/bulk-reader/claude-comparison.sexp
+  -L lisp -L ../nelisp-llm/lisp -L ../nelisp-photon/lisp \
+  -l examples/evaluate-bulk-policy.el \
+  -f nl-agent-example-evaluate-bulk-policy-main \
+  -- --output <path>/report.sexp
 ```
 
-Keep previous reports instead of overwriting them. Check actual answers and
-excerpts; process exit success and `usable` status do not establish accuracy.
-Run broader tests when changes cross runtime/provider boundaries.
+Keep previous reports instead of overwriting them, and check that a report is
+live before comparing it with one: a `stub` report records fabricated answers
+that look plausible in a diff. Read the actual answers and excerpts; process
+exit success and `usable` status do not establish accuracy.
 
 ## Completion reporting
 
-Report changed behavior, relevant tests, measured results, and limitations
-in Japanese. Follow the workspace DB-primary worklog process (`worklog-add`);
-do not append to legacy `capture/ai-logs-*` or edit user journals. The prior
-bulk-reader completion worklog digest is
-`27755f3c5bb7f6c21febad147454906b65970a08`.
-
-For the first Claude session: inspect current changes, reproduce the focused
-baseline, then implement the smallest policy/quality milestone above with a
-lightweight implementation model. Continue routine corrections autonomously.
+Report changed behaviour, relevant tests, measured results and limitations in
+Japanese. Follow the workspace DB-primary worklog process (`worklog-add`); do
+not append to legacy `capture/ai-logs-*` or edit user journals. The most recent
+completion worklog digest is `2cddb1b67def4bf0c20a9ccbf648fe7834c24954`.
