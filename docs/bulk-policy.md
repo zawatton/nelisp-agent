@@ -130,10 +130,13 @@ answer is not usable without fallback or human correction.
     citing one of the two files.
 
 **`fabricated-references`** (severity: `fabricated-reference-screen`, default note)
-  - The reader dropped one or more references it could not verify, and says
-    how many were emitted, how many survived, and why the rest went
-    (`malformed`, `unknown-path`, `out-of-range`, `over-reference-limit`,
-    `over-quoted-lines`).
+  - The reader dropped one or more references because they could not be
+    verified — `malformed`, `unknown-path` or `out-of-range` — and says how
+    many were emitted, how many survived and which of those reasons applied.
+  - The reader's own budgets (`over-reference-limit`, `over-quoted-lines`,
+    `over-path-limit`) also drop references, but those verified and were cut to
+    a limit, so they never raise this code. Mixing the two would teach a host
+    to ignore it.
   - A note, not a rejection: what survives is verified source text, so the
     answer keeps its support and a fallback would buy nothing. The record is
     about the worker, and on the measured corpus it distinguished a worker that
@@ -1512,12 +1515,71 @@ are not content. The serialized result carries the worker's `:elapsed-seconds`,
 and a float prints to a different width from run to run, so `M` is reproducible
 only to within a byte or two. Nothing here depends on that resolution.
 
+### How many references are worth keeping
+
+Repairing the list left a second question: keeping four references at 8.5 KB
+meant the main model read 32 quoted lines, and `M` rose to 3,868 B for that
+case. Every reference kept is text the main model reads, so padding that
+verifies is still padding.
+
+Rebuilding `M` from one live worker pass at each cap — same output, so the caps
+are compared on identical material rather than on separate runs:
+
+| Cap | main input | of direct | aggregate `r*` |
+| ---: | ---: | ---: | ---: |
+| 1 | 5,579 B | 24% | 1.53 |
+| 2 | 7,229 B | 31% | 1.69 |
+| 4 | 9,945 B | 43% | 2.03 |
+| none | 11,424 B | 49% | 2.28 |
+
+A cap is worth a lot, and it has two costs that had to be measured before one
+could be chosen.
+
+**It must be per path.** Capping the list globally drops whole paths, and a
+multi-file answer that no longer cites one of its files fails the coverage
+screen: an accepted result becomes `reject / partial-source-coverage`. That
+recreates the exact failure the repair had just removed. Per path, the cap
+cannot do it.
+
+**Dropping a second span inside one path loses evidence**, and only partly
+visibly. For a two-fact answer where the second fact is numeric, the trim
+raises `unsupported-numeral`, so the loss is reported. For a non-numeric second
+fact nothing fires, and the evidence goes quietly.
+
+That argued for a cap above one, and the measurement said how far above. On
+`multi-fact`, the one corpus question written to need two separate facts, all
+three workers emitted **one** reference, and that single span contained both
+facts — a reference is a line range, so one span covers adjacent facts. Nothing
+observed needed two. The default `max-references-per-path` is therefore **2**:
+one more than anything measured, which trims padding without cutting into a
+shape that has actually been seen.
+
+Live with the cap in place, `llama3.2:3b` went from 11,427 B of main input to
+**7,379 B**, 49% of a direct read down to **32%**, and aggregate `r*` from 2.28
+to **1.70**. The offline sweep predicted 7,229 B; the 150 B difference is the
+repair record itself, which three more cases now carry. `hermes3:8b` is again
+unchanged — it cites one span, so no cap binds.
+
+Taken with the repair, main input for this worker fell from 16,915 B to 7,379 B
+across the five cases, and the price ratio the arrangement requires fell from
+4.23 to 1.70.
+
+### Trimming is not fabricating
+
+The first version of `fabricated-references` fired whenever the reader kept
+fewer references than the worker emitted, which made a budget trim look like an
+invented citation. A host that sees the fabrication code on a well-behaved
+worker learns to ignore it, so the reasons are now split. Only `malformed`,
+`unknown-path` and `out-of-range` mean a citation was invented;
+`over-reference-limit`, `over-quoted-lines` and `over-path-limit` are the
+reader's own budgets and say nothing about the worker. The diagnostic fires
+only on the first group and names only those reasons.
+
 ### What this does not settle
 
-Keeping four references at 8.5 KB means the main model reads 32 quoted lines,
-and `M` rose from 639 B to 3,868 B for that case. Keeping only the first
-verifying reference would be cheaper and is not obviously worse, since the
-answer needs one anchor, not four. That variant has not been measured.
+The cap was chosen from one corpus question about facts on adjacent lines. Two
+facts far apart in a large file would need two spans, and no case like that has
+been measured.
 
 The repair was exercised on one worker in one corpus. A worker that invents a
 citation which happens to land inside the file would pass this check — the

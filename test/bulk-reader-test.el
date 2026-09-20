@@ -331,16 +331,23 @@ succeeded at 4096 with an answer of 38 completion tokens."
     (should (= 1 (plist-get repair :kept)))))
 
 (ert-deftest nl-agent-bulk-reader-test-repair-keeps-the-reference-limit ()
-  ;; Twelve citations that all verify: the limit still caps the list, but it
-  ;; now truncates instead of discarding the answer along with it.
-  (let* ((sources (list (list :path "many.txt" :sha256 (make-string 64 ?c)
-                              :text (mapconcat #'identity (make-list 12 "y") "\n")
-                              :line-count 12)))
+  ;; Ten citations that all verify, spread over five paths so the per-path cap
+  ;; does not bind: the total limit still caps the list, but it now truncates
+  ;; instead of discarding the answer along with it.
+  (let* ((paths '("p1.txt" "p2.txt" "p3.txt" "p4.txt" "p5.txt"))
+         (sources (mapcar (lambda (path)
+                            (list :path path :sha256 (make-string 64 ?c)
+                                  :text "y\ny\n" :line-count 2))
+                          paths))
          (refs (concat "["
-                       (mapconcat (lambda (n)
-                                    (format "{\"path\":\"many.txt\",\"start_line\":%d,\"end_line\":%d}"
-                                            n n))
-                                  (number-sequence 1 12) ",")
+                       (mapconcat
+                        (lambda (path)
+                          (mapconcat
+                           (lambda (n)
+                             (format "{\"path\":\"%s\",\"start_line\":%d,\"end_line\":%d}"
+                                     path n n))
+                           '(1 2) ","))
+                        paths ",")
                        "]"))
          (result (nl-agent-bulk-reader--validate-output
                   nil (format "{\"answer\":\"x\",\"references\":%s,\"not_found\":false}" refs)
@@ -348,8 +355,60 @@ succeeded at 4096 with an answer of 38 completion tokens."
          (repair (plist-get result :reference-repair)))
     (should (= nl-agent-bulk-reader-max-references
                (length (plist-get result :references))))
-    (should (= 12 (plist-get repair :emitted)))
-    (should (memq 'over-reference-limit (plist-get repair :reasons)))))
+    (should (= 10 (plist-get repair :emitted)))
+    (should (memq 'over-reference-limit (plist-get repair :reasons)))
+    (should-not (memq 'over-path-limit (plist-get repair :reasons)))))
+
+(ert-deftest nl-agent-bulk-reader-test-per-path-cap-trims-padding ()
+  ;; Measured: a worker that answers well cites one span, and on the one
+  ;; question written to need two facts all three workers still cited one span
+  ;; containing both.  References beyond a couple per path are padding, and
+  ;; padding is what the main model pays to read.
+  (let* ((sources (list (list :path "many.txt" :sha256 (make-string 64 ?c)
+                              :text (mapconcat #'identity (make-list 12 "y") "\n")
+                              :line-count 12)))
+         (refs (concat "["
+                       (mapconcat (lambda (n)
+                                    (format "{\"path\":\"many.txt\",\"start_line\":%d,\"end_line\":%d}"
+                                            n n))
+                                  (number-sequence 1 6) ",")
+                       "]"))
+         (result (nl-agent-bulk-reader--validate-output
+                  nil (format "{\"answer\":\"x\",\"references\":%s,\"not_found\":false}" refs)
+                  sources))
+         (repair (plist-get result :reference-repair)))
+    (should (= nl-agent-bulk-reader-max-references-per-path
+               (length (plist-get result :references))))
+    (should (= 6 (plist-get repair :emitted)))
+    (should (memq 'over-path-limit (plist-get repair :reasons)))
+    ;; The spans kept are the first ones, not an arbitrary subset.
+    (should (equal '(1 2) (mapcar (lambda (r) (plist-get r :start-line))
+                                  (plist-get result :references))))))
+
+(ert-deftest nl-agent-bulk-reader-test-per-path-cap-keeps-every-path ()
+  ;; The cap is per path precisely so that it cannot break coverage: dropping
+  ;; a whole path turns an accepted multi-file answer into a rejected one.
+  (let* ((sources (list (list :path "a.txt" :sha256 (make-string 64 ?a)
+                              :text "1\n2\n3\n4\n" :line-count 4)
+                        (list :path "b.txt" :sha256 (make-string 64 ?b)
+                              :text "1\n2\n3\n4\n" :line-count 4)))
+         (refs (concat "["
+                       (mapconcat
+                        (lambda (spec)
+                          (format "{\"path\":\"%s\",\"start_line\":%d,\"end_line\":%d}"
+                                  (car spec) (cdr spec) (cdr spec)))
+                        '(("a.txt" . 1) ("a.txt" . 2) ("a.txt" . 3)
+                          ("b.txt" . 1) ("b.txt" . 2) ("b.txt" . 3))
+                        ",")
+                       "]"))
+         (result (nl-agent-bulk-reader--validate-output
+                  nil (format "{\"answer\":\"x\",\"references\":%s,\"not_found\":false}" refs)
+                  sources))
+         (kept (plist-get result :references)))
+    (should (= 4 (length kept)))
+    (should (equal '("a.txt" "b.txt")
+                   (sort (delete-dups (mapcar (lambda (r) (plist-get r :path)) kept))
+                         #'string<)))))
 
 (ert-deftest nl-agent-bulk-reader-test-repair-refuses-when-nothing-survives ()
   ;; Every citation invented and the answer claims to have found something:

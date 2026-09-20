@@ -30,6 +30,14 @@ Excluding them at admission is a deliberate refusal to route a class of
 question, not a claim that the class has been made safe.  See
 `docs/bulk-policy.md'.")
 
+(defconst nl-agent-bulk-policy--fabricated-reasons
+  '(malformed unknown-path out-of-range)
+  "Reader repair reasons that mean a citation was invented rather than trimmed.
+
+The remaining reasons — `over-reference-limit', `over-quoted-lines' and
+`over-path-limit' — drop references that verified perfectly well and were cut
+to a budget, which says nothing about the worker's honesty.")
+
 (cl-defstruct (nl-agent-bulk-policy (:constructor nl-agent-bulk-policy--make))
   mode min-source-bytes max-paths max-question-bytes fallback absence-markers
   numeral-screen excluded-question-kinds require-question-kind
@@ -687,16 +695,23 @@ value anyway is exempt too, which is a known limitation recorded in
         ;; correct answer with them, and says so under `:reference-repair'.
         ;; Surface that here: the references still standing are verified text,
         ;; so this is a statement about the worker, not about the answer.
-        (let ((repair (plist-get result :reference-repair))
-              (screen (nl-agent-bulk-policy-fabricated-reference-screen policy)))
-          (when (and screen (plist-get repair :emitted)
+        ;; Only the reasons that mean a citation was invented count here.  A
+        ;; reference dropped because a budget was reached was verifiable, and
+        ;; calling that a fabrication would train a host to ignore the code
+        ;; that names a real one.
+        (let* ((repair (plist-get result :reference-repair))
+               (screen (nl-agent-bulk-policy-fabricated-reference-screen policy))
+               (invented (seq-filter
+                          (lambda (reason)
+                            (memq reason nl-agent-bulk-policy--fabricated-reasons))
+                          (plist-get repair :reasons))))
+          (when (and screen invented (plist-get repair :emitted)
                      (> (plist-get repair :emitted) (or (plist-get repair :kept) 0)))
             (push (list :code 'fabricated-references :severity screen
-                        :detail (format "Worker emitted %d references, %d verified; dropped: %s"
+                        :detail (format "Worker emitted %d references, %d verified; invented: %s"
                                         (plist-get repair :emitted)
                                         (or (plist-get repair :kept) 0)
-                                        (mapconcat #'symbol-name
-                                                   (plist-get repair :reasons) ", ")))
+                                        (mapconcat #'symbol-name invented ", ")))
                   diagnostics)
             (when (eq screen 'reject) (setq disposition 'reject))))
         (when (and (not not-found) (> (length paths) 1))

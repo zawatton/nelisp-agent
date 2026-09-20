@@ -1300,11 +1300,31 @@ support; what the host learns is that this worker padded the list."
                 '(:emitted 16 :kept 1 :reasons (out-of-range))
                 :fabricated-reference-screen nil)))
   ;; A record that reports nothing dropped is not a fabrication, whoever built
-  ;; it.  The reader does not emit this shape, which is why the guard needs a
-  ;; test of its own rather than relying on the reader's contract.
+  ;; it, even when it also names a reason — that combination is incoherent and
+  ;; the count is what decides.  The reader does not emit this shape, which is
+  ;; why the guard needs a test of its own rather than relying on its contract.
   (should-not (nl-agent-bulk-policy-test--fabricated-code
                (nl-agent-bulk-policy-test--repair-diagnose
                 '(:emitted 3 :kept 3 :reasons nil))))
+  (should-not (nl-agent-bulk-policy-test--fabricated-code
+               (nl-agent-bulk-policy-test--repair-diagnose
+                '(:emitted 3 :kept 3 :reasons (out-of-range)))))
+  ;; Trimming is not fabricating.  A reference dropped because a budget was
+  ;; reached was verifiable; calling that a fabrication would train a host to
+  ;; ignore the code that names an actually invented citation.
+  (should-not (nl-agent-bulk-policy-test--fabricated-code
+               (nl-agent-bulk-policy-test--repair-diagnose
+                '(:emitted 6 :kept 2 :reasons (over-path-limit)))))
+  (should-not (nl-agent-bulk-policy-test--fabricated-code
+               (nl-agent-bulk-policy-test--repair-diagnose
+                '(:emitted 12 :kept 8 :reasons (over-reference-limit over-quoted-lines)))))
+  ;; A mixed record still reports, and names only the invented ones.
+  (let ((code (nl-agent-bulk-policy-test--fabricated-code
+               (nl-agent-bulk-policy-test--repair-diagnose
+                '(:emitted 16 :kept 2 :reasons (out-of-range over-path-limit))))))
+    (should code)
+    (should (string-match-p "out-of-range" (plist-get code :detail)))
+    (should-not (string-match-p "over-path-limit" (plist-get code :detail))))
   (should-error (nl-agent-bulk-policy-new :fabricated-reference-screen 'maybe)))
 
 (when noninteractive

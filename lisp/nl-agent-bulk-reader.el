@@ -15,6 +15,16 @@
 (defconst nl-agent-bulk-reader-max-output-bytes 8192)
 (defconst nl-agent-bulk-reader-max-answer-chars 2048)
 (defconst nl-agent-bulk-reader-max-references 8)
+(defconst nl-agent-bulk-reader-max-references-per-path 2
+  "How many verified references to keep for any one source path.
+
+Every reference kept is text the main model then reads, so padding is paid
+for twice.  Measured: workers that answer well cite one span, and on the one
+corpus question written to need two separate facts, all three workers cited a
+single span containing both.  Two leaves a margin of one over anything
+observed.  Capping per path rather than in total is not a detail — dropping a
+whole path makes a correct multi-file answer fail the coverage screen, which
+was measured before this limit was added.")
 (defconst nl-agent-bulk-reader-max-quoted-lines 80)
 (defconst nl-agent-bulk-reader-policy-version "bulk-reader-v1")
 (defconst nl-agent-bulk-reader--json-null (make-symbol "json-null"))
@@ -223,13 +233,17 @@ still fails, because an uncited answer is what this module exists to refuse."
     (unless (vectorp refs) (error "invalid references"))
     (when (string-empty-p (string-trim answer)) (error "empty answer"))
     (when (and (eq not-found :false) (= (length refs) 0)) (error "answer requires references"))
-    (let ((result nil) (quoted 0) (emitted (length refs)) (reasons nil))
+    (let ((result nil) (quoted 0) (emitted (length refs)) (reasons nil)
+          (per-path (make-hash-table :test #'equal)))
       (dolist (ref (append refs nil))
         (let ((defect (nl-agent-bulk-reader--reference-defect ref sources)))
           (cond
            (defect (cl-pushnew defect reasons))
            ((>= (length result) nl-agent-bulk-reader-max-references)
             (cl-pushnew 'over-reference-limit reasons))
+           ((>= (gethash (nl-agent-bulk-reader--alist ref "path") per-path 0)
+                nl-agent-bulk-reader-max-references-per-path)
+            (cl-pushnew 'over-path-limit reasons))
            (t
             (let* ((path (nl-agent-bulk-reader--alist ref "path"))
                    (start (nl-agent-bulk-reader--alist ref "start_line"))
@@ -242,6 +256,7 @@ still fails, because an uncited answer is what this module exists to refuse."
               (if (> (+ quoted lines) nl-agent-bulk-reader-max-quoted-lines)
                   (cl-pushnew 'over-quoted-lines reasons)
                 (setq quoted (+ quoted lines))
+                (puthash path (1+ (gethash path per-path 0)) per-path)
                 (push (list :path path :start-line start :end-line end
                             :sha256 (plist-get source :sha256)
                             :text (nl-agent-bulk-reader--line-text
