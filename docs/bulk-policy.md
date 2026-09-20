@@ -2004,6 +2004,15 @@ truncation warning as an error signal, because the result will not carry one.
 4096-token context can hold, so the reader's own limit is not the protection it
 might appear to be.
 
+The reader takes `:max-request-bytes` for this, and refuses before the call
+rather than after: over the budget it fails with `request-too-large` and sends
+nothing, reporting the size it declined so the worker can be sized against it.
+It is **unset by default**, because the right value is the worker's context in
+bytes and this code path cannot ask for it — the OpenAI-compatible endpoint
+exposes no such field. A host that knows its server should set it. Refusing
+costs a fallback; a silently truncated prompt costs a wrong answer that
+verifies.
+
 ### The repairs now appear in the canonical run
 
 Four of the five ladder cases dropped references, which is the first time any

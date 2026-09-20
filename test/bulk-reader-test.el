@@ -504,6 +504,57 @@ succeeded at 4096 with an answer of 38 completion tokens."
     (should (= 1 (length (plist-get result :references))))
     (should (memq 'over-quoted-lines (plist-get repair :reasons)))))
 
+(ert-deftest nl-agent-bulk-reader-test-request-budget-refuses-before-sending ()
+  "A prompt too large for the worker fails here rather than being cut there.
+
+Measured: the server truncates an oversized prompt, logs a warning and returns
+a normal 200.  Nothing in the response says the model saw less than it was
+sent, and a mildly truncated prompt still answers coherently from an
+incomplete source with a citation that verifies against the whole file.  The
+only place that can refuse is before the call."
+  (nl-agent-bulk-reader-test--file (mapconcat #'identity (make-list 200 "line") "\n")
+    (let* ((registry (nl-llm-agent-provider-registry-new))
+           (calls 0))
+      (nl-llm-agent-provider-register
+       registry (nl-llm-agent-provider-new
+                 "local" :models '((:id "model"))
+                 :open (lambda (_m _o) '(:live t))
+                 :complete (lambda (_s _m) (setq calls (1+ calls)) "{}")
+                 :close (lambda (_s) nil)))
+      (let* ((router (nl-agent-host-router-new registry))
+             (reader (nl-agent-bulk-reader-new router "local/model" '("local/model")
+                                               directory :max-request-bytes 256))
+             (result (nl-agent-bulk-reader-run reader "where?" '("sample.txt"))))
+        (should (eq 'failed (plist-get result :status)))
+        (should (eq 'request-too-large (plist-get result :error-code)))
+        ;; The point is that nothing was sent.
+        (should (= 0 calls))
+        ;; The size that was refused is reported, so a host can size its worker.
+        (should (numberp (plist-get (plist-get result :metrics)
+                                    :request-content-utf8-bytes))))
+      ;; Unset, the budget imposes nothing.
+      (let* ((router (nl-agent-host-router-new registry))
+             (reader (nl-agent-bulk-reader-new router "local/model" '("local/model")
+                                               directory))
+             (result (nl-agent-bulk-reader-run reader "where?" '("sample.txt"))))
+        (should-not (eq 'request-too-large (plist-get result :error-code)))
+        (should (> calls 0))))))
+
+(ert-deftest nl-agent-bulk-reader-test-request-budget-validated ()
+  (nl-agent-bulk-reader-test--file "one\n"
+    (let* ((registry (nl-llm-agent-provider-registry-new)))
+      (nl-llm-agent-provider-register
+       registry (nl-llm-agent-provider-new "local" :models '((:id "model"))
+                                           :open (lambda (&rest _) nil)
+                                           :complete (lambda (&rest _) "")
+                                           :close (lambda (&rest _) nil)))
+      (let ((router (nl-agent-host-router-new registry)))
+        (dolist (bad '(0 -1 "512" 1.5))
+          (should-error (nl-agent-bulk-reader-new router "local/model" '("local/model")
+                                                  directory :max-request-bytes bad)))
+        (should (nl-agent-bulk-reader-new router "local/model" '("local/model")
+                                          directory :max-request-bytes 1))))))
+
 ;;; bulk-reader-test.el ends here
 
 (when noninteractive

@@ -55,7 +55,8 @@ lines the fraction permits 54.")
 (defconst nl-agent-bulk-reader--json-null (make-symbol "json-null"))
 
 (cl-defstruct (nl-agent-bulk-reader (:constructor nl-agent-bulk-reader--make))
-  router selector allowlist root max-tokens timeout-sec temperature json-mode)
+  router selector allowlist root max-tokens timeout-sec temperature json-mode
+  max-request-bytes)
 
 (defconst nl-agent-bulk-reader-input-schema
   '(:type "object" :properties
@@ -99,21 +100,29 @@ lines the fraction permits 54.")
     (error "bulk reader root must be local text"))
   (unless (and (stringp selector) (not (string-empty-p selector))) (error "invalid selector"))
   (let ((allowlist (nl-agent-bulk-reader--allowlist allowlist))
-        (max-tokens 4096) (timeout-sec 60) (temperature 0.2) (json-mode nil))
+        (max-tokens 4096) (timeout-sec 60) (temperature 0.2) (json-mode nil)
+        (max-request-bytes nil))
     (unless (member selector allowlist) (error "selector is not allowlisted"))
-    (nl-agent-bulk-reader--keys keys '(:max-tokens :timeout-sec :temperature :json-mode) "bulk reader")
+    (nl-agent-bulk-reader--keys keys '(:max-tokens :timeout-sec :temperature :json-mode
+                                       :max-request-bytes)
+                                "bulk reader")
     (while keys
       (pcase (pop keys)
         (:max-tokens (setq max-tokens (pop keys)))
         (:timeout-sec (setq timeout-sec (pop keys)))
         (:temperature (setq temperature (pop keys)))
-        (:json-mode (setq json-mode (pop keys)))) )
+        (:json-mode (setq json-mode (pop keys)))
+        (:max-request-bytes (setq max-request-bytes (pop keys)))) )
     (unless (and (integerp max-tokens) (<= 1 max-tokens 65536)) (error "invalid :max-tokens"))
     (unless (and (integerp timeout-sec) (<= 1 timeout-sec 3600)) (error "invalid :timeout-sec"))
     (unless (and (numberp temperature) (<= 0 temperature 1)) (error "invalid :temperature"))
     (unless (or (null json-mode) (eq json-mode t)) (error "invalid :json-mode"))
+    (unless (or (null max-request-bytes)
+                (and (integerp max-request-bytes) (> max-request-bytes 0)))
+      (error "invalid :max-request-bytes"))
     (nl-agent-bulk-reader--make :router router :selector selector :allowlist allowlist
                                  :root (nl-agent-local--root root "bulk reader")
+                                 :max-request-bytes max-request-bytes
                                  :max-tokens max-tokens :timeout-sec timeout-sec
                                  :temperature temperature :json-mode json-mode)))
 
@@ -335,6 +344,19 @@ still fails, because an uncited answer is what this module exists to refuse."
                 messages (nl-agent-bulk-reader--messages question sources))
           (setq request-bytes
                 (apply #'+ (mapcar (lambda (m) (string-bytes (encode-coding-string (cdr m) 'utf-8 t))) messages)))
+          ;; Refuse here rather than let the server cut the prompt there.
+          ;; Measured: an oversized prompt is truncated silently — a warning in
+          ;; the server log and a normal 200 — and a prompt trimmed by a few
+          ;; hundred tokens still answers coherently from an incomplete source,
+          ;; with a citation that verifies against the whole file because
+          ;; verification reads the file rather than whatever the worker saw.
+          ;; Nothing downstream can see that, so the only place to stop it is
+          ;; before the call.  Unset by default: the right value is the worker's
+          ;; context, which this code cannot ask for.
+          (when (and (nl-agent-bulk-reader-max-request-bytes reader)
+                     (> request-bytes (nl-agent-bulk-reader-max-request-bytes reader)))
+            (setq error-code 'request-too-large)
+            (error "request exceeds the configured budget"))
           (let ((session nil))
             (unwind-protect
                 (progn
