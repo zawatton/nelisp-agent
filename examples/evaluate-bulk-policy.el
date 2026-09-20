@@ -84,16 +84,29 @@
     ("conflict-within-file" . conflict)
     ("conflict-by-date" . conflict)
     ("quoted-instruction-as-data" . quoted-instruction)
-    ("quoted-instruction-other-party" . quoted-instruction))
+    ("quoted-instruction-other-party" . quoted-instruction)
+    ;; The size ladder.  Ordinary factual questions whose only distinction is
+    ;; that their sources clear `min-source-bytes' — the regime where the
+    ;; arrangement can pay at all, and which the other corpora do not reach.
+    ("size-1k" . fact)
+    ("size-2k" . fact)
+    ("size-3k" . fact)
+    ("size-5k" . fact)
+    ("size-8k" . fact))
   "Alist mapping case id to review kind. Conflict cases never report proxy-pass.")
 
 (defun nl-agent-example-bulk-policy-load-cases
-    (&optional frozen-corpus-path policy-corpus-path excluded-corpus-path)
-  "Load the frozen, policy and excluded-kind corpora, validating the frozen hash.
+    (&optional frozen-corpus-path policy-corpus-path excluded-corpus-path
+               sizes-corpus-path)
+  "Load the frozen, policy, excluded-kind and size corpora, validating the hash.
 Signal an error if the frozen corpus hash is not the expected constant.
-Returns fourteen cases in order: frozen five, policy four, excluded five.
-The frozen loader caps a corpus at five cases, which is why the excluded-kind
-cases live in a third file rather than being appended to the policy one."
+Returns twenty cases in order: frozen five, policy five, excluded five, sizes
+five.  The frozen loader caps a corpus at five cases, which is why each group
+lives in its own file rather than being appended to the policy one.
+
+The size ladder is here because without it every source in this evaluation sat
+below the measured crossover, so the byte comparison described a regime where
+delegation is known not to pay."
   (let* ((frozen-path (or frozen-corpus-path
                          (expand-file-name "examples/bulk-reader-corpus.sexp"
                                          nl-agent-example-bulk-policy-root)))
@@ -103,6 +116,9 @@ cases live in a third file rather than being appended to the policy one."
          (excluded-path (or excluded-corpus-path
                            (expand-file-name "examples/bulk-excluded-corpus.sexp"
                                            nl-agent-example-bulk-policy-root)))
+         (sizes-path (or sizes-corpus-path
+                        (expand-file-name "examples/bulk-sizes-corpus.sexp"
+                                        nl-agent-example-bulk-policy-root)))
          (frozen (nl-agent-example-bulk-eval-load-corpus frozen-path))
          (frozen-hash (plist-get frozen :hash)))
     (unless (equal frozen-hash nl-agent-example-bulk-policy--frozen-corpus-hash)
@@ -110,9 +126,11 @@ cases live in a third file rather than being appended to the policy one."
              nl-agent-example-bulk-policy--frozen-corpus-hash frozen-hash))
     (let* ((policy (nl-agent-example-bulk-eval-load-corpus policy-path))
            (excluded (nl-agent-example-bulk-eval-load-corpus excluded-path))
+           (sizes (nl-agent-example-bulk-eval-load-corpus sizes-path))
            (all-cases (append (plist-get frozen :cases)
                              (plist-get policy :cases)
-                             (plist-get excluded :cases)))
+                             (plist-get excluded :cases)
+                             (plist-get sizes :cases)))
            (all-ids (mapcar (lambda (c) (plist-get c :id)) all-cases)))
       ;; Validate that every id has a review kind.
       (dolist (id all-ids)
@@ -122,9 +140,11 @@ cases live in a third file rather than being appended to the policy one."
             :frozen (length (plist-get frozen :cases))
             :policy (length (plist-get policy :cases))
             :excluded (length (plist-get excluded :cases))
+            :sizes (length (plist-get sizes :cases))
             :frozen-hash (plist-get frozen :hash)
             :policy-hash (plist-get policy :hash)
             :excluded-hash (plist-get excluded :hash)
+            :sizes-hash (plist-get sizes :hash)
             :cases all-cases))))
 
 (defun nl-agent-example-bulk-policy--get-kind (case-id)

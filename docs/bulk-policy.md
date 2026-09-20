@@ -1770,9 +1770,9 @@ dropped — no `out-of-range`, no `over-path-limit`, no `over-span-fraction`.
 This corpus does not exercise any of today's reader work, because its sources
 are small and on small sources this worker cites a single span. The
 improvements were measured on the size ladder, where sources run to 8.5 KB and
-the worker pads; **they do not show up here, and nothing in this section should
-be read as confirming them.** The two sets of numbers describe different
-material.
+the worker pads; **they do not show up here, and nothing in this part of the
+section should be read as confirming them.** That gap is what prompted adding
+the ladder to the evaluation, below.
 
 The byte conclusion is unchanged. Direct main input 18,901 B, delegated main
 input 15,907 B, worker input 30,313 B, combined **46,220 B — 2.45× the direct
@@ -1807,6 +1807,59 @@ will be wrong either way. Whether a frontier main model clears these shapes is
 not something this corpus can say, since every model in it is small.
 
 Totalled over all 15 cases: direct 12, delegated 8.
+
+### The evaluation was measuring the regime where it cannot pay
+
+Those 15 cases carry sources of 137 B to 9.9 KB, and 14 of them are under
+1 KB. The break-even work put the crossover near 600 B for a well-behaved
+worker and 2.6 KB for a talkative one, and `min-source-bytes` at 3072. So the
+headline byte comparison was a true number about material the policy would
+refuse to delegate — and that is why no repair fired: on sources that small
+this worker cites a single span, and there is nothing to repair.
+
+`examples/bulk-sizes-corpus.sexp` is now part of the evaluation, which runs
+**20 cases**. The ladder straddles the threshold deliberately, two cases below
+and three above, so one run reports both regimes.
+
+Split at `min-source-bytes`, the same run says two different things:
+
+| | cases | direct | main | worker | combined | `r*` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Below 3 KB | 16 | 12,068 B | 17,395 B (**144%**) | 24,117 B | 41,512 B (3.44×) | **never** |
+| At or above | 4 | 30,181 B | 5,893 B (**20%**) | 33,381 B | 39,274 B (1.30×) | **1.37** |
+
+Below the threshold delegation does not merely fail to save: it makes the main
+model read **44% more** than reading the sources itself, so no price ratio
+recovers it. Above, the main model reads **one fifth** as much, and the ratio
+needed is 1.37 — met by any local worker. The old aggregate, one number over
+both groups, stated neither.
+
+Per case the contrast is plain. `M/D` runs 126% to 225% on the small cases and
+11% to 33% on the large ones, with `distractor-tail` at 11% and `size-5k` at
+17%.
+
+### The repairs now appear in the canonical run
+
+Four of the five ladder cases dropped references, which is the first time any
+of this session's reader work shows up in the evaluation rather than in a
+probe:
+
+| Case | Repair |
+| --- | --- |
+| `size-1k` | 3 emitted, 2 kept — `out-of-range` |
+| `size-2k` | 5 emitted, 2 kept — `over-path-limit` |
+| `size-3k` | 8 emitted, 2 kept — `over-path-limit` |
+| `size-8k` | 16 emitted, 2 kept — `over-path-limit`, `out-of-range` |
+
+The reason split works end to end: `fabricated-references` fired **twice**, on
+the two cases whose reasons include an invented citation, and stayed silent on
+the two whose only reason was a budget. A host reading this run can tell a
+worker that padded its list from one that invented line numbers.
+
+The exercise arm admitted 12 of 20 and refused 8 on question kind; 10 finished
+delegated, 2 were rejected and fell back. Diagnostics across the run:
+`fabricated-references` 2, `absence-marker-conflict` 1,
+`partial-source-coverage` 1.
 
 ## Not measured
 

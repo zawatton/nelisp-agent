@@ -37,12 +37,13 @@
 
 (ert-deftest bulk-policy-eval-test-frozen-corpus-loads-with-hash ()
   "The frozen corpus loads and its hash matches the expected constant.
-The combined list is fifteen cases: first five equal to frozen corpus."
+The combined list is twenty cases: first five equal to frozen corpus."
   (let ((cases-data (nl-agent-example-bulk-policy-load-cases)))
-    (should (= (plist-get cases-data :total) 15))
+    (should (= (plist-get cases-data :total) 20))
     (should (= (plist-get cases-data :frozen) 5))
     (should (= (plist-get cases-data :policy) 5))
     (should (= (plist-get cases-data :excluded) 5))
+    (should (= (plist-get cases-data :sizes) 5))
     (should (equal (plist-get cases-data :frozen-hash)
                    nl-agent-example-bulk-policy--frozen-corpus-hash))
     ;; First five cases should be equal to those from frozen corpus.
@@ -184,7 +185,7 @@ At most eight paths per case, ids unique, invalid corpus opens no inference."
 The arms are produced by `nl-agent-bulk-policy-resolve', so this also proves the
 runner actually calls the policy module instead of only requiring it."
   (let ((report (nl-agent-bulk-policy-eval-test--stub-report)))
-    (should (= 15 (length (plist-get report :cases))))
+    (should (= 20 (length (plist-get report :cases))))
     (dolist (case (plist-get report :cases))
       (let ((conservative (nl-agent-bulk-policy-eval-test--arm
                            case 'policy-conservative))
@@ -214,9 +215,9 @@ runner actually calls the policy module instead of only requiring it."
     (let ((summary (cl-find 'policy-conservative
                             (plist-get (plist-get report :summary) :policy-arms)
                             :key (lambda (arm) (plist-get arm :label)))))
-      (should (= 15 (plist-get summary :final-direct)))
+      (should (= 20 (plist-get summary :final-direct)))
       (should (= 0 (plist-get summary :final-delegated)))
-      (should (equal '((mode-direct-only . 15))
+      (should (equal '((mode-direct-only . 20))
                      (plist-get summary :decision-reasons))))))
 
 (ert-deftest bulk-policy-eval-test-excluded-kinds-are-never-delegated ()
@@ -253,7 +254,9 @@ Cases whose kind the policy excludes are covered by the test above."
                               (plist-get report :cases)))
          (codes nil)
          (rejected 0))
-    (should (= 7 (length cases)))
+    ;; Seven from the original corpora plus the five of the size ladder, whose
+    ;; kind is `fact' and which the exercise arm therefore routes.
+    (should (= 12 (length cases)))
     (dolist (case cases)
       (let ((arm (nl-agent-bulk-policy-eval-test--arm case 'policy-exercise)))
         (should (eq 'admitted (plist-get (plist-get arm :decision) :reason)))
@@ -435,6 +438,52 @@ default would be reported as if it had used the requested limit."
             (setenv "NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT" bad)
             (should-error (nl-agent-example-bulk-policy--worker-timeout))))
       (setenv "NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT" saved))))
+
+(ert-deftest bulk-policy-eval-test-sizes-corpus-is-the-payable-regime ()
+  "The evaluation must contain sources large enough for delegation to pay.
+
+Measured, delegation cannot pay below roughly 3 KB of source, and until the
+size ladder was added every case in this evaluation sat far below that — the
+headline byte comparison was a true number about a regime where the mechanism
+is known not to work.  These cases are the ones that clear `min-source-bytes',
+so the run reports both regimes rather than only the losing one."
+  (let* ((cases (plist-get (nl-agent-example-bulk-policy-load-cases) :cases))
+         (sizes (cl-remove-if-not (lambda (c) (string-prefix-p "size-" (plist-get c :id)))
+                                  cases))
+         (root (expand-file-name "examples/bulk-reader-corpus"
+                                 nl-agent-bulk-policy-eval-test--root))
+         (bytes (mapcar
+                 (lambda (case)
+                   (apply #'+ (mapcar
+                               (lambda (path)
+                                 (with-temp-buffer
+                                   (set-buffer-multibyte nil)
+                                   (insert-file-contents-literally
+                                    (expand-file-name path root))
+                                   (buffer-size)))
+                               (plist-get case :paths))))
+                 sizes)))
+    (should (= 5 (length sizes)))
+    ;; The ladder must straddle the threshold rather than sit on one side of
+    ;; it: cases below say what delegation costs where it cannot pay, cases
+    ;; above say what it saves where it can.
+    (require 'nl-agent-bulk-policy)
+    (let ((threshold (nl-agent-bulk-policy-min-source-bytes
+                      (nl-agent-bulk-policy-new :mode 'opt-in))))
+      (should (cl-some (lambda (n) (< n threshold)) bytes))
+      (should (cl-some (lambda (n) (> n (* 2 threshold))) bytes)))
+    (should (> (apply #'max bytes) 8000))
+    ;; And the older corpora stay where they were: if these all became large
+    ;; the comparison would lose the regime it originally measured.
+    (should (cl-some (lambda (c)
+                       (and (not (string-prefix-p "size-" (plist-get c :id)))
+                            (< (with-temp-buffer
+                                 (set-buffer-multibyte nil)
+                                 (insert-file-contents-literally
+                                  (expand-file-name (car (plist-get c :paths)) root))
+                                 (buffer-size))
+                               1024)))
+                     cases))))
 
 (ert-deftest bulk-policy-eval-test-spread-corpus-fires-no-rival ()
   "The corpus that exposed the enumerated-item false positive stays quiet.
