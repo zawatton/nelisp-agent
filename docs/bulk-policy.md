@@ -394,7 +394,12 @@ suggests. That is why `examples/bulk-dense-corpus.sexp` exists: repeated
 measurements, equipment labels, a schedule and an invoice, each fed its own
 correct answer. It broke three of the four rules' worth of the screen when it
 was first run, which is the point of it, and a test keeps it as a regression
-guard. Nineteen cases of incidental numbers — prose, tables and English — is still
+guard. The break-even section above is arithmetic over measured bytes, not a cost
+measurement: no token counts, no prices and no billing were involved, and only
+one corpus case exceeds 1 KB, so the curve between 0.7 KB and 9.9 KB is
+unmeasured.
+
+Nineteen cases of incidental numbers — prose, tables and English — is still
 not a wide sample. The rules are tuned to Japanese, where a compound like
 絶縁抵抗 distinguishes itself from 接地抵抗 in two characters; English spreads
 the same distinction over a shared word and defeats the threshold, which is
@@ -1200,6 +1205,106 @@ The shipped default is still 60 seconds. The evaluation runner reads
 editing code, and a malformed value is an error rather than a silent fallback
 to the default, because a measurement that quietly used 60 while reporting 180
 would be worse than no measurement.
+
+## What delegation costs when the two models are priced differently
+
+Every measurement so far counted bytes, and by bytes delegation loses: combined
+input runs at about twice direct. That comparison assumes the main model and
+the worker cost the same per token, which is the one thing this arrangement
+exists to exploit. The question the handoff actually asks — cost per validated
+result — needs the price ratio in it.
+
+Write `D` for the direct main input, `M` for the delegated main input, `W` for
+the worker input, and `r` for how much more the main model costs per token than
+the worker. Delegation is cheaper when
+
+    M + W / r  <  D        that is,   r  >  W / (D − M)
+
+so each case has a break-even ratio `r* = W / (D − M)`. Bytes stand in for
+tokens here. The substitution cancels in `W` and in the source part of `D`,
+since both hold the same text; what it does not cancel in is `M`, the
+serialized worker result, which is largely ASCII where the sources are
+Japanese. `M` is at most about 1,300 bytes, so the approximation is good
+wherever the source is much larger than that — which is the only regime where
+delegation pays at all.
+
+### Eight cases out of nine can never pay, at any price
+
+| Case (baseline run) | Direct | Delegated main | Worker | `r*` |
+| --- | ---: | ---: | ---: | ---: |
+| distractor-tail | 10,718 | 1,180 | 11,550 | **1.21** |
+| short-factual | 434 | 976 | 1,152 | never |
+| multi-file-negation | 610 | 941 | 1,434 | never |
+| absent-answer | 477 | 919 | 1,195 | never |
+| quoted-instruction | 629 | 1,184 | 1,347 | never |
+| multi-fact | 516 | 993 | 1,234 | never |
+| absent-field | 529 | 993 | 1,247 | never |
+| conflicting-sources | 606 | 1,099 | 1,428 | never |
+| quoted-instruction-embedded | 659 | 1,255 | 1,377 | never |
+
+"Never" is not a large number: it means `D − M` is negative. The serialized
+worker result is **bigger than the source it replaces**, so the main model pays
+more than it would have paid reading the source directly, and a worker is added
+on top. No price ratio rescues that.
+
+The aggregate `r*` of 3.90 for that run, and 6.32 for the fourteen-case run, is
+therefore a misleading average: it is one case that works divided among eight or
+thirteen that cannot.
+
+### Where the crossover is
+
+Delegation starts reducing main input once the direct prompt exceeds the
+serialized result. Both sides can be measured without a model, by building the
+two prompts directly:
+
+| Source | Direct prompt | |
+| ---: | ---: | --- |
+| 388 B | 679 B | below every observed `M` |
+| 776 B | 1,079 B | inside the observed `M` range (822–1,280) |
+| 1,552 B | 1,887 B | above every observed `M` |
+
+So the crossover sits near **1 KB of source**, not the 8 KB the
+`min-source-bytes` default happens to use. The corpora contain nothing between
+0.7 KB and 9.9 KB, so the shape of the curve through that gap is unmeasured.
+
+### The ratio a host would need
+
+Taking `D ≈ s + 500`, `M ≈ 1,100` and `W ≈ s + 1,500` from the measurements,
+and letting `f` be the fraction of delegations the policy rejects — each of
+which pays for the direct read as well — the requirement becomes
+`r* = W / (D(1−f) − M)`:
+
+| Source | `f` = 0 | 0.14 | 0.33 | 0.50 |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 KB | 6.25 | 13.16 | never | never |
+| 2 KB | 2.50 | 3.33 | 6.09 | 23.33 |
+| 5 KB | 1.48 | 1.79 | 2.51 | 3.94 |
+| 10 KB | 1.22 | 1.45 | 1.94 | 2.77 |
+| 50 KB | 1.04 | 1.22 | 1.57 | 2.13 |
+
+The measured rejection rates were 1 of 7 routed cases in the most recent run
+and 2 to 3 of 6 to 7 in the earlier ones, so 0.14 to 0.5 brackets what was
+observed.
+
+`r*` falls towards 1 as the source grows: for a large enough source, delegation
+pays as soon as the worker is cheaper at all. For a small one it never pays,
+whatever the discount.
+
+### What this changes
+
+The byte result stands and the conclusion drawn from it was too broad.
+Delegation does not reduce total work, and on a corpus of small questions it
+cannot reduce cost either. On large sources it can, and the ratio required is
+undemanding — a frontier main model against a small worker is routinely more
+than a factor of five apart.
+
+This is arithmetic over measured byte counts, not a measurement of cost. No
+token counts, no prices and no billing were involved, and the corpus has one
+case above 1 KB. What it does establish is where to look: `min-source-bytes` is
+the parameter that decides whether delegation can pay, its current default is a
+placeholder well above the crossover, and the table above turns it into
+something a host can compute from its own price ratio and observed rejection
+rate rather than guess.
 
 ## Not measured
 
