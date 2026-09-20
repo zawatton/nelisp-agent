@@ -50,7 +50,14 @@ question, not a claim that the class has been made safe.  See
 ;;;###autoload
 (defun nl-agent-bulk-policy-new (&rest keys)
   "Create a new delegation policy with validated settings."
-  (let ((mode 'direct-only) (min-source-bytes 8192) (max-paths 1) (max-question-bytes 4096)
+  ;; `min-source-bytes' is the one admission threshold with a measured value.
+  ;; 3072 is the next whole KiB above 2,578 B, the largest source size at which
+  ;; any tested worker still made the main model read more than a direct read
+  ;; would have.  Passing it is necessary for delegation to pay, not sufficient:
+  ;; a worker whose results are often rejected needs a far larger source before
+  ;; the arithmetic works.  See docs/bulk-policy.md, "The gap between 0.7 KB and
+  ;; 9.9 KB".
+  (let ((mode 'direct-only) (min-source-bytes 3072) (max-paths 1) (max-question-bytes 4096)
         (fallback t) (absence-markers (copy-sequence nl-agent-bulk-policy-default-absence-markers))
         (numeral-screen 'note)
         (excluded-question-kinds

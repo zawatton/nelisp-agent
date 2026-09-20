@@ -1218,5 +1218,29 @@ having omitted it."
     (should (eq 'reject (plist-get diag :disposition))))
   (should-error (nl-agent-bulk-policy-new :field-rival-screen 'maybe)))
 
+;; The source-size threshold is the one admission limit derived from
+;; measurement rather than chosen as a placeholder, so its default is pinned
+;; here: a silent change would move the routing boundary away from the size
+;; ladder recorded in docs/bulk-policy.md without anything turning red.
+(ert-deftest nl-agent-bulk-policy-test-min-source-bytes-default-is-measured ()
+  (let ((policy (nl-agent-bulk-policy-new :mode 'opt-in)))
+    (should (= 3072 (nl-agent-bulk-policy-min-source-bytes policy)))
+    ;; 2,578 B is the largest measured crossover across the tested workers;
+    ;; the default must sit above it and must not have been rounded up so far
+    ;; that the measured band is excluded again.
+    (should (> (nl-agent-bulk-policy-min-source-bytes policy) 2578))
+    (should (< (nl-agent-bulk-policy-min-source-bytes policy) 8192))
+    ;; A source just under the threshold is refused, one just over is admitted.
+    (should (eq 'too-few-source-bytes
+                (plist-get (nl-agent-bulk-policy-admit
+                            policy '(:question "q" :paths ("f.txt")
+                                     :source-bytes 3071 :question-kind fact))
+                           :reason)))
+    (should (eq 'admitted
+                (plist-get (nl-agent-bulk-policy-admit
+                            policy '(:question "q" :paths ("f.txt")
+                                     :source-bytes 3072 :question-kind fact))
+                           :reason)))))
+
 (when noninteractive
   (ert-run-tests-batch-and-exit))

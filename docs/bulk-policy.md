@@ -37,16 +37,20 @@ so the recorded reason is deterministic:
    Default: max 4096 bytes. Configuration placeholder.
 
 6. **`too-few-source-bytes`**: Total source size is below `min-source-bytes`.
-   Default: min 8192 bytes. Configuration placeholder. The evaluation on
-   `examples/bulk-reader-corpus` includes one case where a multi-file request
-   with a small total (< 1 KB) was handled; see `bulk-reader.md` for details.
-   One synthetic case cannot establish a production threshold.
+   Default: min 3072 bytes, derived from measurement. Below roughly 600 B of
+   source the delegated main prompt is *larger* than the direct one, so
+   delegation raises main-model input no matter how cheap the worker is; the
+   exact crossover depends on how much source text the worker quotes back, and
+   the largest one measured was 2,578 B. 3072 is the next whole KiB above it.
+   See "The gap between 0.7 KB and 9.9 KB" below for the ladder this comes
+   from. Clearing this threshold is necessary for delegation to pay, not
+   sufficient.
 
 7. **`admitted`**: all prior checks passed. Admitted for delegation.
 
-Rules 4 to 6 are host configuration placeholders, not empirical routing
-thresholds. The single large-source observation in `bulk-reader.md` cannot
-support a production threshold decision. Rules 2 and 3 are different in kind:
+Rules 4 and 5 are host configuration placeholders, not empirical routing
+thresholds. Rule 6 is not: its default is the measured point below which
+delegation cannot pay at any price. Rules 2 and 3 are different in kind again:
 they refuse to route rather than tune a limit.
 
 ### Question kinds refused by policy
@@ -1264,8 +1268,10 @@ two prompts directly:
 | 1,552 B | 1,887 B | above every observed `M` |
 
 So the crossover sits near **1 KB of source**, not the 8 KB the
-`min-source-bytes` default happens to use. The corpora contain nothing between
-0.7 KB and 9.9 KB, so the shape of the curve through that gap is unmeasured.
+`min-source-bytes` default happened to use at the time. The corpora contained
+nothing between 0.7 KB and 9.9 KB, so the shape of the curve through that gap
+was unmeasured; it has since been measured, and the section "The gap between
+0.7 KB and 9.9 KB" below supersedes this estimate.
 
 ### The ratio a host would need
 
@@ -1305,6 +1311,138 @@ the parameter that decides whether delegation can pay, its current default is a
 placeholder well above the crossover, and the table above turns it into
 something a host can compute from its own price ratio and observed rejection
 rate rather than guess.
+
+## The gap between 0.7 KB and 9.9 KB, 2026-09-20
+
+The break-even work above left the curve unmeasured exactly where the routing
+decision is made. `examples/bulk-sizes-corpus.sexp` fills it: five cases whose
+sources differ only in how much filler surrounds one buried non-numeric fact,
+so source size is the single moving variable. The fact sits two thirds of the
+way down each file, the filler carries no measurements and no repeated field
+names, and each case asks for a different fact, so a worker cannot carry an
+answer across sizes.
+
+Sources are `examples/bulk-reader-corpus/sizes/log-{1k,2k,3k,5k,8k}.txt`.
+
+### `D` and `W` are deterministic; `M` is not
+
+The direct prompt `D` and the worker prompt `W` are built from the source, so
+both are fixed before any model runs and were byte-identical in every run:
+
+| Source | `D` direct prompt | `W` worker prompt |
+| ---: | ---: | ---: |
+| 1,025 B | 1,393 B | 2,121 B |
+| 2,060 B | 2,492 B | 3,233 B |
+| 3,539 B | 4,041 B | 4,801 B |
+| 5,522 B | 6,130 B | 6,915 B |
+| 8,518 B | 9,292 B | 10,115 B |
+
+Least squares over those five points gives `D(s) = 1.054·s + 315` and
+`W(s) = 1.066·s + 1030`. `W` exceeds `D` at every size, and the two slopes are
+within 1.2 % of each other, so `r*` falls towards **1.01** as the source grows
+and never reaches it. Delegation cannot be free however large the source is.
+
+`M`, the delegated main prompt, is the part that needs a model, because it
+contains whatever the worker chose to quote. Three workers, `llama3.2:3b`
+twice (temperature 0.0, and the repeat was byte-identical to ±1 B):
+
+| Worker | `M` by size | min | max | refs emitted |
+| --- | --- | ---: | ---: | --- |
+| `llama3.2:3b` | 621 / 2,165 / 3,031 / 1,034 / 639 | 621 | 3,031 | 0 / 5 / 8 / 1 / 0 |
+| `hermes3:8b` | 941 / 970 / 943 / 1,001 / 1,013 | 941 | 1,013 | 1 each |
+| `qwen3:4b` | 885 / 903 / 885 / 932 / 946 | 885 | 946 | 1 each |
+
+**`M` does not scale with source size.** For the two workers that cite one
+span, it is flat at roughly 900–1,000 B across a source that grew eight-fold.
+`llama3.2:3b` varies five-fold, and the variation tracks the number of
+references it emits, not the size of the file.
+
+### Crossover, measured
+
+`D − M > 0` is where delegation begins to reduce main input at all:
+
+| Worker | typical `M` | crossover | worst observed `M` | crossover |
+| --- | ---: | ---: | ---: | ---: |
+| `qwen3:4b` | 903 B | 558 B | 946 B | 599 B |
+| `hermes3:8b` | 970 B | 621 B | 1,013 B | 662 B |
+| `llama3.2:3b` | 1,034 B | 682 B | 3,031 B | **2,578 B** |
+
+The earlier estimate of "near 1 KB" was right for a well-behaved worker and
+optimistic for a talkative one. The default `min-source-bytes` is now **3072**,
+the next whole KiB above the largest measured crossover, so the threshold holds
+for every worker tested rather than for the best one.
+
+The measured `r*` per point, `W / (D − M)`:
+
+| Source | `llama3.2:3b` | `hermes3:8b` | `qwen3:4b` |
+| ---: | ---: | ---: | ---: |
+| 1,025 B | 2.75 | 4.69 | 4.18 |
+| 2,060 B | 9.89 | 2.12 | 2.03 |
+| 3,539 B | 4.75 | 1.55 | 1.52 |
+| 5,522 B | 1.36 | 1.35 | 1.33 |
+| 8,518 B | 1.17 | 1.22 | 1.21 |
+
+And the threshold a host would need for a target price ratio, from the fitted
+`D` and `W` and a chosen `M`:
+
+| `r` | `M` = 950 | `M` = 1,013 | `M` = 3,031 |
+| ---: | ---: | ---: | ---: |
+| 1.5 | 3,856 B | 4,040 B | 9,927 B |
+| 2 | 2,209 B | 2,330 B | 6,208 B |
+| 3 | 1,401 B | 1,491 B | 4,382 B |
+| 5 | 1,001 B | 1,076 B | 3,477 B |
+| 10 | 779 B | 846 B | 2,977 B |
+| 100 | 619 B | 679 B | 2,614 B |
+
+Past a ratio of about 10 the requirement stops moving: the threshold is set by
+the crossover, not by the discount. A local worker against a frontier main
+model is far past that point, so in practice the size question is settled by
+`D − M > 0` alone.
+
+### The two "failures" were correct answers with invented citations
+
+`llama3.2:3b` returned `bulk-reader-failure` on the 1 KB and 8.5 KB cases. The
+raw output shows this was not a comprehension failure:
+
+```
+=== size-1k ===
+{"answer": "事務所金庫",
+ "references": [{"path":"sizes/log-1k.txt","start_line":10,"end_line":11},
+                {"path":"sizes/log-1k.txt","start_line":12,"end_line":13},
+                {"path":"sizes/log-1k.txt","start_line":14,"end_line":15}], ...}
+-> (error "reference path or range invalid")
+```
+
+The answer is correct and the first reference is exactly right: line 10 of a
+14-line file is the fact. The result was rejected because the third span runs
+past the end of the file. At 8.5 KB the same model answered correctly and
+emitted sixteen references running to line 200 of a 109-line file, which the
+reader rejected as `invalid references`.
+
+So all three workers found all five facts at all five sizes — **comprehension
+was 15 of 15**. What differed was citation discipline, and it is the thing that
+actually costs: a rejected result means the main model pays `W` and then reads
+`D` anyway. Two rejections in five is a fallback fraction of 0.4, and at that
+rate `D(1−f) − M` is negative at 3.5 KB for this worker, so delegation cannot
+pay there at any price even though the source clears `min-source-bytes`.
+
+This also corrects a reading of the earlier rounds: a worker recorded as
+failing is not necessarily a worker that got the answer wrong, and the two
+should not be reported as one number.
+
+### What this does not settle
+
+The filler is uniform and the fact is a single short span, which is the easiest
+shape for a worker to cite. A source where the answer is spread across several
+places would raise `M` for every worker, moving the crossover up.
+
+`M` was sampled once per worker per size (twice for `llama3.2:3b`, identically).
+Nothing here bounds how `M` behaves on a corpus with varied source shapes, and
+the threshold is only as good as the citation behaviour of the worker in use.
+The 3072 default holds for the three workers tested on this ladder.
+
+No token counts, prices or billing were involved; these are UTF-8 byte counts
+of the exact messages sent.
 
 ## Not measured
 
