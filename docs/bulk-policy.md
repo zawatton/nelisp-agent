@@ -1554,6 +1554,33 @@ optimistic for a talkative one. The default `min-source-bytes` is now **3072**,
 the next whole KiB above the largest measured crossover, so the threshold holds
 for every worker tested rather than for the best one.
 
+#### The crossing point exactly
+
+`D` needs no model, so the point where it overtakes a given `M` is exact
+rather than fitted. Sweeping the real fixture one character at a time against
+every `M` the 20-case run recorded:
+
+| `M` | from | `M/D` drops below 100% at |
+| ---: | --- | ---: |
+| 702 B | `quoted-instruction-other-party`, the smallest | **370 B** |
+| 919 B | `absent-answer` | 576 B |
+| 976 B | `short-factual` | 634 B |
+| 1,034 B | `size-5k`, the lowest on the ladder | 689 B |
+| 1,180 B | `distractor-tail` | 826 B |
+| 1,327 B | `size-1k` | 954 B |
+| 1,340 B | `size-2k` | 964 B |
+| 2,347 B | `size-8k`, the largest | **1,923 B** |
+
+So there is no single crossing point: it is set by how much the worker quotes
+back. Above **1,923 B** of source, `M/D` is below 100% for every worker
+behaviour observed after the reference limits; below **370 B** it is above
+100% for all of them. `min-source-bytes` sits above this range at 3072,
+because clearing 100% only means the main model reads less — repaying the
+worker's own prompt needs more.
+
+For reference, `D` against the same fixture: 104 B of source gives 427 B,
+569 B gives 910 B, 1,024 B gives 1,388 B.
+
 The measured `r*` per point, `W / (D − M)`:
 
 | Source | `llama3.2:3b` | `hermes3:8b` | `qwen3:4b` |
