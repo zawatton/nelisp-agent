@@ -1752,6 +1752,62 @@ reference verifies, it is simply the wrong span, and nothing here detects that.
 The coverage and disagreement screens are what stand between that and a wrong
 answer, and they were not changed.
 
+## The baseline re-run on the current code, 2026-09-20
+
+Everything above changed the reader or the policy after the headline run was
+recorded, so the canonical evaluation was run again live — same corpora, same
+`llama3.1:8b` main and `llama3.2:3b` worker, 15 cases.
+
+**The nine cases the earlier run also contained reproduced exactly.** Direct
+passed all nine; delegation passed five, and the four that failed are the same
+four, failing the same way: the June 18 date dropped from a two-fact answer,
+a general telephone number substituted for an unrecorded mobile one, September
+10 asserted with "the sources do not disagree", and the printed instruction
+concluded to be binding while quoting the line that calls it an error.
+
+**No repair record fired on any of the 15 cases.** Not one reference was
+dropped — no `out-of-range`, no `over-path-limit`, no `over-span-fraction`.
+This corpus does not exercise any of today's reader work, because its sources
+are small and on small sources this worker cites a single span. The
+improvements were measured on the size ladder, where sources run to 8.5 KB and
+the worker pads; **they do not show up here, and nothing in this section should
+be read as confirming them.** The two sets of numbers describe different
+material.
+
+The byte conclusion is unchanged. Direct main input 18,901 B, delegated main
+input 15,907 B, worker input 30,313 B, combined **46,220 B — 2.45× the direct
+read**. Delegation still does not reduce total work.
+
+The exercise arm admitted 7 of 15 and refused 8 on question kind. Of the 7 it
+routed, 5 finished delegated and 2 were rejected and fell back, on
+`absence-marker-conflict` and `partial-source-coverage`.
+
+### The excluded kinds are not only hard for the worker
+
+Judged by reading the answers, on the six cases the earlier run did not
+contain, **direct passed 3 of 6 and delegation passed 3 of 6** — the same
+three. Both named both values on the two conflicts that state them plainly,
+both reported the quoted remark as data, and both failed the same three:
+
+| Case | Direct | Delegated |
+| --- | --- | --- |
+| `conflict-within-file` | 400A alone | 400A alone |
+| `conflict-by-date` | 6か月 alone | 6か月 alone |
+| `quoted-instruction-other-party` | "the recipient must follow it" | "No answer found." |
+
+The last is worth stating plainly: the source says the instruction is addressed
+to the contractor and that the holder of the form is the party to be contacted.
+Direct answered, confidently, that the holder must follow it.
+
+So the exclusion of these kinds rests on a narrower claim than it looked.
+Delegation fails them — that was measured — but so does reading the sources
+directly, with the same 8B-class model. What the exclusion buys on this
+evidence is not a better answer; it is not paying a worker for an answer that
+will be wrong either way. Whether a frontier main model clears these shapes is
+not something this corpus can say, since every model in it is small.
+
+Totalled over all 15 cases: direct 12, delegated 8.
+
 ## Not measured
 
 Token counts, billing and energy use are `unavailable`: the provider does not
