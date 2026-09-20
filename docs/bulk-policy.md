@@ -1,5 +1,51 @@
 # Bulk delegation policy
 
+## What this measured
+
+A small local worker reads the files and answers with citations the host can
+check; the policy decides whether that is worth doing. Everything below is
+measured on synthetic corpora with small local models, in UTF-8 bytes of the
+exact messages sent. No token counts, no prices, no billing.
+
+**Source size decides whether it can pay at all.** Below roughly 3 KB the
+worker's serialized result is larger than the source it replaces, so the main
+model reads *more* than it would reading the files itself — 144% of a direct
+read on the measured cases, which no price ratio recovers. At or above it the
+main model reads 20%, and the break-even price ratio is 1.37. The threshold
+`min-source-bytes` is 3072, the whole KiB above the largest crossover measured
+across three workers. See "The gap between 0.7 KB and 9.9 KB" and "The
+evaluation was measuring the regime where it cannot pay".
+
+**It does not reduce total work, and is not meant to.** Combined main-plus-
+worker input runs 1.30× a direct read on large sources and 3.44× on small
+ones; the worker reads the whole file either way. Delegation pays only when
+the two models are priced differently, and `r*` falls towards 1.01 as the
+source grows but never below it — the arrangement is never free.
+
+**The citation machinery is what makes a delegated answer usable**, and its
+failure mode is not what it looks like. Workers answered correctly and then
+padded their citation lists with invented line numbers; discarding those
+results was the expensive path, since the main model paid the worker and then
+read the source anyway. References that cannot be verified are now dropped and
+counted, at most two per path, none spanning more than half its file — and if
+nothing survives the result still fails. On the ladder this took one worker
+from two rejections in five to none and its break-even ratio from 4.23 to 1.70.
+
+**Two question kinds are refused rather than screened**, conflicts and quoted
+instructions, on eight measured examples. Note the limit found later: with a
+small main model, reading those sources directly fails them too. The exclusion
+avoids paying a worker for an answer that will be wrong either way; it does not
+buy a right one.
+
+**What no screen covers**: an answer that cites the right line and then states
+something else, when the value has no digits in it. That screen was built,
+measured at eight false alarms in nine, and withdrawn — the main model already
+reads the answer and the cited text side by side, so it is positioned to see
+this and the screens are for what it cannot see. See "A claim with no digits".
+
+Nothing here establishes a production threshold, a cloud cost saving, or a
+ranking of models. Read "Not measured" before quoting any of it.
+
 ## Policy decisions
 
 The policy module (`nl-agent-bulk-policy.el`) decides whether to delegate a
