@@ -278,6 +278,7 @@ is a false positive.
 | Plus a longer threshold | 4 / 4 / 0 | 0 false | **missed** | — |
 | Plus separator stripping | 4 / 4 / 0 | 0 false | caught | 1 caught, 1 **missed** |
 | Plus a wider window and copula stripping | **4 / 4 / 0** | **0 false** | **caught** | **2 caught, 1 false** |
+| Plus the introducer rule | 4 / 4 / 0 | 0 false | caught | 2 caught, 1 false |
 
 Recorded counts are fires / true / false over 86 worker answers; the corpora
 columns report false positives against their own correct answers.
@@ -320,6 +321,65 @@ Both contexts are therefore stripped of their trailing separators — spaces,
 the threshold counts characters of what is left. On the stripped form
 絶縁抵抗 against 接地抵抗 share only 「抵抗」, so four characters is now
 enough, and the shortest genuine contradiction, 「契約電力」, is exactly four.
+
+### Enumerated items, and the rule the parallel-subject test could not reach
+
+A later corpus broke it again, and this one was not exotic: `spread` numbers
+its inspection items — 点検項目1, 点検項目2 — which is how such records are
+written. The answer stated 2時間. The screen found that same 2 in the source's
+点検項目2, paired it with 点検項目1, and reported a disagreement. Six live runs,
+three workers, two fixtures: **six rejections of six correct answers.**
+
+The parallel-subject rule cannot reach this shape. It compares what is left of
+each context once the shared tail is removed, and here the difference *is* the
+number, so the shared tail is the whole context and both remainders are empty.
+The identifier characters do not reach it either: they cover 第2回路 and
+D-3301, where a marker sits against the digit, but nothing marks 点検項目2.
+
+The contexts say plainly what separates the two:
+
+```
+value 1   context "点検項目"              <- nothing introduces it: a label
+value 2   context "年次点検の停電時間は"   <- introduced by は: a value
+```
+
+So a numeral counts as a value only when its clause contains a separator or a
+copula, and two contexts are compared only when both do. Two details were
+forced by calibration rather than chosen:
+
+- **The separator is looked for anywhere in the clause, not at its end.**
+  Requiring it at the end also suppressed the 10 of 9月10日, whose introducer
+  sits before the 9 — a compound value keeps its introduction even when a unit
+  splits the digits.
+- **The test is applied where two contexts are compared, never when deciding
+  which numbers an answer states.** Applied at extraction it deleted the 6 of
+  the recorded answer "6 months", which opens the sentence and so has no
+  context at all, and the screen then found nothing to compare anywhere.
+
+Both mistakes were made in that order and each was caught by an existing test,
+which is the calibration suite doing its job.
+
+Run over every corpus with each case fed its own correct answer — 42 cases
+across nine files, no model involved:
+
+| | fires |
+| --- | ---: |
+| Before the rule | 12 of 42 |
+| After | 10 of 42 |
+
+The two that went are the two `spread` false positives. The other ten are
+identical, value for value and context for context: the five recorded
+conflicts, the dense and table conflicts, and the three English fires (of which
+one, `en-readings`, is the known English false positive that keeps English on
+`note`). Nothing true was lost.
+
+The rule has a known blind spot, kept deliberately. A field written with no
+separator at all — 契約電力250kW beside 契約電力は300kW — is now read as a
+label on the unseparated side and the pair is not compared. No corpus contains
+that shape; tables use commas, pipes, tabs or spaces, all of which are
+separators. The symmetric form is what makes the rule work on enumerations,
+where neither side is introduced, so both sides are tested and both directions
+have a case pinning them.
 
 ### English works less well, and the guide says where
 
@@ -554,6 +614,24 @@ decision logic:
 Why the frozen corpus is loaded by hash: Accidental edits to regression
 evidence break unrelated tests silently. Validation by hash ensures the
 baseline is never changed without explicit audit.
+
+### Two facts, near and far apart
+
+`examples/bulk-spread-corpus.sexp` holds two cases that differ in one thing:
+how far apart the two facts sit. Same size (5,536 B), same line count, same
+two facts, same question; in one they are on lines 36 and 37, in the other on
+lines 15 and 58. It was written to test the per-path reference cap, and the
+cap held — every worker cited exactly the two fact lines, and both facts
+survived. One fact is non-numeric and one is numeric on purpose, so a trim
+that loses evidence can be seen on the side a screen covers and on the side
+none does.
+
+It earned its place for something else. Its filler numbers each inspection
+item, and that exposed the enumerated-item false positive described above,
+which had been rejecting correct answers in any record written that way.
+`bulk-policy-eval-test.el` reads this fixture and asserts the screen stays
+quiet on it, including that the filler still contains numbered items, so the
+guarantee is tied to the file rather than to a copy of its text.
 
 ### Excluded-kind corpus
 

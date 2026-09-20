@@ -349,6 +349,26 @@ numbers are list labels rather than rival readings of one value.  Measured
 against the recorded runs, that single rule removed seven false positives and
 kept the one true positive.")
 
+(defun nl-agent-bulk-policy--strip-separator-run (text)
+  "Return TEXT without its trailing run of separator characters."
+  (let ((end (length text)))
+    (while (and (> end 0)
+                (string-match-p nl-agent-bulk-policy--rival-separator
+                                (substring text (1- end) end)))
+      (setq end (1- end)))
+    (substring text 0 end)))
+
+(defun nl-agent-bulk-policy--strip-separators (text)
+  "Return TEXT without the separators and copula that link it to a value."
+  (let* ((trimmed (nl-agent-bulk-policy--strip-separator-run text))
+         (lowered (downcase trimmed))
+         (copula (let ((case-fold-search t))
+                   (when (string-match
+                          (concat nl-agent-bulk-policy--rival-copula "\\'") lowered)
+                     (match-beginning 0)))))
+    (nl-agent-bulk-policy--strip-separator-run
+     (if copula (substring trimmed 0 copula) trimmed))))
+
 (defun nl-agent-bulk-policy--numeral-contexts (text)
   "Return ((VALUE . LEFT-CONTEXT) ...) for every digit run in TEXT.
 Fullwidth digits are normalised first.  LEFT-CONTEXT reaches back at most
@@ -364,19 +384,19 @@ nothing from the sentence before it."
              ;; A number glued to an identifier is a label, not a measurement:
              ;; T-1, B-2, D-3301, 第1回路.  Comparing labels pairs every item of
              ;; an enumeration with every other.
-             (label (and (> begin 0)
-                         (string-match-p "[-_A-Za-z第]"
-                                         (substring norm (1- begin) begin))))
+             (marked (and (> begin 0)
+                          (string-match-p "[-_A-Za-z第]"
+                                          (substring norm (1- begin) begin))))
              (window (substring norm (max 0 (- begin nl-agent-bulk-policy-rival-context-chars))
                                 begin))
              (cut (let ((last nil) (index 0))
                     (while (string-match nl-agent-bulk-policy--rival-boundary window index)
                       (setq last (match-end 0) index (match-end 0)))
-                    last)))
+                    last))
+             (context (string-trim-left (if cut (substring window cut) window)))
+             (label marked))
         (unless label
-          (push (cons (substring norm begin end)
-                      (string-trim-left (if cut (substring window cut) window)))
-                result))
+          (push (cons (substring norm begin end) context) result))
         (setq start end)))
     (nreverse result)))
 
@@ -403,32 +423,47 @@ the contradictions, because a real contradiction restates the same subject."
        (not (equal left right))
        (= 1 (cl-count nil (cl-mapcar #'eq (append left nil) (append right nil))))))
 
-(defun nl-agent-bulk-policy--strip-separator-run (text)
-  "Return TEXT without its trailing run of separator characters."
-  (let ((end (length text)))
-    (while (and (> end 0)
-                (string-match-p nl-agent-bulk-policy--rival-separator
-                                (substring text (1- end) end)))
-      (setq end (1- end)))
-    (substring text 0 end)))
+(defun nl-agent-bulk-policy--introduced-value-p (context)
+  "Return non-nil when CONTEXT introduces a value rather than naming a thing.
 
-(defun nl-agent-bulk-policy--strip-separators (text)
-  "Return TEXT without the separators and copula that link it to a value."
-  (let* ((trimmed (nl-agent-bulk-policy--strip-separator-run text))
-         (lowered (downcase trimmed))
-         (copula (let ((case-fold-search t))
-                   (when (string-match
-                          (concat nl-agent-bulk-policy--rival-copula "\\'") lowered)
-                     (match-beginning 0)))))
-    (nl-agent-bulk-policy--strip-separator-run
-     (if copula (substring trimmed 0 copula) trimmed))))
+A value arrives after a separator or a copula — 契約電力は250, 電力,250,
+the interval is 6 — while a label is glued straight to its noun: 点検項目2,
+回路3.  The identifier characters in `nl-agent-bulk-policy--numeral-contexts'
+catch the marked forms (第2回路, D-3301); this catches the rest.
+
+Measured, and the reason this exists: an enumeration the rule misses pairs
+every item with every other, and 点検項目2 matched against 点検項目1 rejected
+six correct answers out of six.  `nl-agent-bulk-policy--parallel-subjects-p'
+cannot cover that shape, because when the differing character is the number
+itself the shared tail is the whole context and both remainders are empty.
+
+The separator has to be looked for anywhere in the clause, not only at the
+end.  Measured: requiring it at the end also suppressed the 10 of 9月10日,
+whose introducer 「は」 sits before the 9 — a compound value keeps its
+introduction even though the digits are split by a unit.  Anywhere in the
+clause distinguishes the two shapes that matter, since a bare enumerated item
+has no separator at all between the sentence boundary and its number.
+
+The test is applied where two contexts are compared, never to decide which
+numbers an answer states: a number opening a sentence has no context at all
+and would otherwise vanish from the answer.
+
+The copula is not tested separately.  Every alternative in
+`nl-agent-bulk-policy--rival-copula' begins with a space, and a space is in
+the separator set, so a context carrying a copula already carries a
+separator."
+  (and (stringp context)
+       (string-match-p nl-agent-bulk-policy--rival-separator context)
+       t))
 
 (defun nl-agent-bulk-policy--rival-contexts-p (raw-mine raw-other)
   "Return non-nil when the contexts introduce competing readings of one slot."
   (let* ((mine (nl-agent-bulk-policy--strip-separators raw-mine))
          (other (nl-agent-bulk-policy--strip-separators raw-other))
          (shared (nl-agent-bulk-policy--shared-tail mine other)))
-    (and (>= shared nl-agent-bulk-policy-rival-match-chars)
+    (and (nl-agent-bulk-policy--introduced-value-p raw-mine)
+         (nl-agent-bulk-policy--introduced-value-p raw-other)
+         (>= shared nl-agent-bulk-policy-rival-match-chars)
          (not (nl-agent-bulk-policy--parallel-subjects-p
                (substring mine 0 (- (length mine) shared))
                (substring other 0 (- (length other) shared)))))))

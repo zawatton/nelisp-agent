@@ -436,6 +436,36 @@ default would be reported as if it had used the requested limit."
             (should-error (nl-agent-example-bulk-policy--worker-timeout))))
       (setenv "NELISP_AGENT_BULK_EVAL_WORKER_TIMEOUT" saved))))
 
+(ert-deftest bulk-policy-eval-test-spread-corpus-fires-no-rival ()
+  "The corpus that exposed the enumerated-item false positive stays quiet.
+
+Its filler numbers each inspection item, which is how these records are
+written, and the screen used to match the answer's 2時間 against 点検項目2 and
+pair it with 点検項目1 — rejecting a correct answer in every one of six live
+runs.  Reading the fixture rather than an inline string is the point: this ties
+the guarantee to the file, so deleting or diluting it turns the test red."
+  (require 'nl-agent-bulk-policy)
+  (let* ((corpus (nl-agent-example-bulk-eval-load-corpus
+                  (expand-file-name "examples/bulk-spread-corpus.sexp"
+                                    nl-agent-bulk-policy-eval-test--root)))
+         (root (expand-file-name "examples/bulk-reader-corpus"
+                                 nl-agent-bulk-policy-eval-test--root))
+         (cases (plist-get corpus :cases)))
+    (should (= 2 (length cases)))
+    (dolist (case cases)
+      (let* ((sources
+              (mapcar (lambda (path)
+                        (list :path path
+                              :text (with-temp-buffer
+                                      (insert-file-contents (expand-file-name path root))
+                                      (buffer-string))))
+                      (plist-get case :paths)))
+             (answer (nl-agent-example-bulk-eval--stub-answer case)))
+        ;; The filler has to contain numbered items, or the case proves nothing.
+        (should (string-match-p "点検項目[0-9]" (plist-get (car sources) :text)))
+        (should (string-match-p "2時間" answer))
+        (should-not (nl-agent-bulk-policy--unreported-rivals answer sources))))))
+
 (when noninteractive
   (ert-run-tests-batch-and-exit))
 

@@ -1242,6 +1242,79 @@ having omitted it."
                                      :source-bytes 3072 :question-kind fact))
                            :reason)))))
 
+;;; Enumerated items are labels, not competing values.
+;;
+;; Found by running a corpus whose filler numbers its inspection items, which
+;; is how such records are actually written.  The answer stated 2時間; the
+;; screen matched that 2 against 点検項目2 in the source, paired it with
+;; 点検項目1, and rejected a correct answer.  Six cases out of six.
+;;
+;; The parallel-subject rule cannot catch this shape: it compares what is left
+;; of each context after the shared tail, and when the differing character is
+;; the number itself the shared tail is the whole context, so both remainders
+;; are empty.  The distinction that does hold is how the number is introduced —
+;; a value arrives after a separator or copula, a label is glued to its noun.
+
+(ert-deftest nl-agent-bulk-policy-test-rival-enumerated-items ()
+  (let* ((sources '((:path "a.txt"
+                     :text "点検項目1の外観に異常はありません。\n点検項目2の外観に異常はありません。\n年次点検の停電時間は2時間でした。\n")))
+         (diag (nl-agent-bulk-policy-test--rival-diagnose
+                sources "年次点検の停電時間は2時間でした。")))
+    (should-not (cl-find 'unreported-rival-value (plist-get diag :diagnostics)
+                         :key (lambda (d) (plist-get d :code))))
+    (should (eq 'accept-for-review (plist-get diag :disposition)))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-needs-an-introducer ()
+  ;; The rule, stated directly.
+  (should (nl-agent-bulk-policy--introduced-value-p "契約電力は"))
+  (should (nl-agent-bulk-policy--introduced-value-p "契約電力,"))
+  (should (nl-agent-bulk-policy--introduced-value-p "the interval is "))
+  ;; A compound value keeps its introduction even when a unit splits the
+  ;; digits: the 10 of 9月10日 is introduced by the は before the 9.
+  (should (nl-agent-bulk-policy--introduced-value-p "年次点検の実施日は9月"))
+  ;; Glued to its noun with nothing introducing it: a label.
+  (should-not (nl-agent-bulk-policy--introduced-value-p "点検項目"))
+  (should-not (nl-agent-bulk-policy--introduced-value-p "回路"))
+  ;; A number opening a sentence has no context, so nothing introduces it and
+  ;; nothing can be compared with it either.
+  (should-not (nl-agent-bulk-policy--introduced-value-p ""))
+  ;; It must not change which numbers an answer is taken to state: an answer
+  ;; beginning with its value still states it.
+  (should (equal '("6") (mapcar #'car (nl-agent-bulk-policy--numeral-contexts "6 months"))))
+  ;; The marked identifier forms stay excluded at extraction, as before.
+  (should-not (nl-agent-bulk-policy--numeral-contexts "第2回路の測定値"))
+  (should-not (nl-agent-bulk-policy--numeral-contexts "D-3301の銘板")))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-introducer-applies-to-both-sides ()
+  "A comparison is between two values, so both contexts must introduce one.
+Requiring it of one side only would still suppress an enumeration, where
+neither side is introduced, so each direction needs its own case."
+  ;; The answer's value is introduced; its rival is not.
+  (should-not
+   (nl-agent-bulk-policy--unreported-rivals
+    "契約電力は250kWです"
+    '((:path "a.txt" :text "契約電力は250kWです。\n契約電力300kWです。\n"))))
+  ;; And the mirror: the answer's value is not introduced, its rival is.
+  (should-not
+   (nl-agent-bulk-policy--unreported-rivals
+    "契約電力250kWです"
+    '((:path "a.txt" :text "契約電力250kWです。\n契約電力は300kWです。\n"))))
+  ;; Both introduced is the shape the screen exists for, and still fires.
+  (should
+   (nl-agent-bulk-policy--unreported-rivals
+    "契約電力は250kWです"
+    '((:path "a.txt" :text "契約電力は250kWです。\n契約電力は300kWです。\n")))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-contradiction-survives-the-rule ()
+  "The screen must still catch what it exists for."
+  (let* ((sources '((:path "a.txt" :text "契約電力は250kWです。\n")
+                    (:path "b.txt" :text "契約電力は300kWです。\n")))
+         (diag (nl-agent-bulk-policy-test--rival-diagnose sources "契約電力は250kWです"))
+         (rival (cl-find 'unreported-rival-value (plist-get diag :diagnostics)
+                         :key (lambda (d) (plist-get d :code)))))
+    (should rival)
+    (should (eq 'reject (plist-get diag :disposition)))))
+
 ;;; Fabricated references.
 ;;
 ;; The reader drops citations it cannot verify instead of losing the whole
