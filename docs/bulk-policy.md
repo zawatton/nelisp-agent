@@ -16,12 +16,15 @@ main model reads 20%, and the break-even price ratio is 1.37. The threshold
 across three workers. See "The gap between 0.7 KB and 9.9 KB" and "The
 evaluation was measuring the regime where it cannot pay".
 
-**The window has an upper edge too, and it is close.** At 24 KB of source both
-workers failed every attempt; at 8.5 KB both answered facts at either end of
-the file. The usable range is therefore roughly **2 KB to 10 KB** — bounded
-below by the crossover and above by the worker's runtime context, which this
-code path cannot set. Claims below about `r*` approaching 1.01 on large
-sources describe sizes no worker here can read. See "The upper edge".
+**The window has an upper edge, set by the worker's context rather than by the
+arrangement.** At the host's default of 4096 tokens both workers failed every
+attempt at 24 KB and answered both ends of the file at 8.5 KB, giving a usable
+range of roughly 2 KB to 10 KB. Raising the server to 16384 answered 24 KB
+correctly at both ends. The request cannot set this; the host can. **Oversized
+prompts are truncated silently** — a server-side warning and a normal `200` —
+and a mildly truncated prompt still answers coherently, from an incomplete
+source, with a citation that verifies against the whole file. See "The upper
+edge".
 
 **It does not reduce total work, and is not meant to.** Combined main-plus-
 worker input runs 1.30× a direct read on large sources and 3.44× on small
@@ -1936,34 +1939,70 @@ asked for separately:
 | 48 KB | either | failed | failed |
 
 Eight oversized attempts, two workers, both ends of the file: **none
-succeeded.** So the usable window is about **2 KB to 10 KB** — the crossover
-at the bottom, the worker's context at the top — and the asymptotic argument
-for large sources describes sizes that cannot be delegated here at all.
+succeeded.**
 
-The ceiling is not configurable from this code path.
-`nl-llm-agent-openai--body-option-keys` forwards `temperature`, `top_p`,
-`max_tokens`, `seed`, `stop`, `tools`, `tool_choice` and `response_format`.
-`num_ctx` is not among them, so the runtime context is whatever the server
-defaults to — 4096 on this host, against a model declaring 131072. Raising it
-means changing the server or the model, not the request.
+#### The ceiling is the server's, and it is raisable
 
-**The failure is loud, which matters more than the limit.** The worry was a
-truncated prompt producing a confident wrong answer, because a citation
-verifies against the whole file whatever the worker was actually shown, so
-nothing downstream could catch it. What came back at 24 KB was not a wrong
-answer about the records:
+That table was taken at the host's default. The server log says where the
+default comes from:
+
+```
+msg="vram-based default context" total_vram="6.0 GiB" default_num_ctx=4096
+```
+
+4096 tokens, sized from the graphics memory, against models that declare
+131072. The request cannot change it: `nl-llm-agent-openai--body-option-keys`
+forwards `temperature`, `top_p`, `max_tokens`, `seed`, `stop`, `tools`,
+`tool_choice` and `response_format`, and `num_ctx` is not among them. **The
+host can.** With `OLLAMA_CONTEXT_LENGTH=16384` the model loads at 16384
+(`ollama ps` confirms it) and still fits in 6 GiB, using 5,031 MiB.
+
+At that setting the 24 KB file was answered **correctly at both ends** —
+事務所金庫 cited at line 2, 北側危険物置場の書棚 cited at line 305, in 56 and
+63 seconds. So the 2 KB–10 KB window is a property of the default
+configuration, not of the arrangement.
+
+#### Truncation is silent, and the client cannot tell
+
+This is the part that matters, and it corrects what the loud failure above
+suggested. When a prompt exceeds the context, the server does not refuse it:
+
+```
+level=WARN msg="truncating input prompt" limit=16384 prompt=17685 keep=4 new=16384
+```
+
+A warning in the server log, and a normal `200` to the caller. Nothing in the
+response says the model saw less than it was sent.
+
+Both outcomes were observed **at the same nominal setting**: two 24 KB
+requests were truncated at 17,685 tokens against a 16,384 limit, and two later
+requests for the same file at the same setting were not, and answered
+correctly. Whether a given call is cut is not something the caller can predict
+or detect.
+
+The failure at the default context was loud because the cut was catastrophic —
+the instruction itself fell out of what the model saw, and what came back was a
+generic product catalogue:
 
 ```json
 { "items": [ { "item_id": 1, "item_name": "Item 1",
                "description": "This is item 1.", "price": 10.99 }, … ] }
 ```
 
-A generic product catalogue — the instruction itself was gone from what the
-model saw. `output keys are not exact` rejected it. The fixed output schema,
-which exists to make results checkable, is also what makes an over-long prompt
-fail visibly instead of quietly. Across the eight attempts every failure was of
-this kind: malformed output or none at all, never a plausible answer. That is
-eight samples, not a proof that no size produces a plausible wrong one.
+`output keys are not exact` rejected it. The fixed output schema, which exists
+to make results checkable, is also what made an over-long prompt fail visibly.
+**But loudness is a function of how badly the prompt was cut, not a property of
+the mechanism.** A prompt trimmed by a few hundred tokens leaves a model able
+to answer coherently from an incomplete source, and its citation will verify
+against the whole file, because verification reads the file rather than
+whatever the worker was shown. No screen here can see that.
+
+The practical consequence for a host: keep the worker's context comfortably
+above the largest prompt the reader will build, and treat the server's
+truncation warning as an error signal, because the result will not carry one.
+`nl-agent-bulk-reader-max-aggregate-bytes` is 128 KB, far above what a
+4096-token context can hold, so the reader's own limit is not the protection it
+might appear to be.
 
 ### The repairs now appear in the canonical run
 
