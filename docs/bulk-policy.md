@@ -16,6 +16,13 @@ main model reads 20%, and the break-even price ratio is 1.37. The threshold
 across three workers. See "The gap between 0.7 KB and 9.9 KB" and "The
 evaluation was measuring the regime where it cannot pay".
 
+**The window has an upper edge too, and it is close.** At 24 KB of source both
+workers failed every attempt; at 8.5 KB both answered facts at either end of
+the file. The usable range is therefore roughly **2 KB to 10 KB** — bounded
+below by the crossover and above by the worker's runtime context, which this
+code path cannot set. Claims below about `r*` approaching 1.01 on large
+sources describe sizes no worker here can read. See "The upper edge".
+
 **It does not reduce total work, and is not meant to.** Combined main-plus-
 worker input runs 1.30× a direct read on large sources and 3.44× on small
 ones; the worker reads the whole file either way. Delegation pays only when
@@ -1910,6 +1917,53 @@ both groups, stated neither.
 Per case the contrast is plain. `M/D` runs 126% to 225% on the small cases and
 11% to 33% on the large ones, with `distractor-tail` at 11% and `size-5k` at
 17%.
+
+### The upper edge: the regime that pays best cannot be reached
+
+Every table above says the same thing — the larger the source, the better
+delegation looks, with `r*` falling towards 1.01. The largest source measured
+was 9.9 KB. Above it the worker simply stops working.
+
+Two facts were placed in one file, on line 2 and on the last line, and each
+asked for separately:
+
+| Source | Fact | `llama3.2:3b` | `qwen3:4b` |
+| ---: | --- | --- | --- |
+| 8.5 KB | line 2 | failed | **correct**, cited 2-2 |
+| 8.5 KB | last line | **correct**, cited 100-110 | **correct**, cited 110-110 |
+| 24 KB | line 2 | failed | failed (`empty-provider-output`) |
+| 24 KB | last line | failed | failed |
+| 48 KB | either | failed | failed |
+
+Eight oversized attempts, two workers, both ends of the file: **none
+succeeded.** So the usable window is about **2 KB to 10 KB** — the crossover
+at the bottom, the worker's context at the top — and the asymptotic argument
+for large sources describes sizes that cannot be delegated here at all.
+
+The ceiling is not configurable from this code path.
+`nl-llm-agent-openai--body-option-keys` forwards `temperature`, `top_p`,
+`max_tokens`, `seed`, `stop`, `tools`, `tool_choice` and `response_format`.
+`num_ctx` is not among them, so the runtime context is whatever the server
+defaults to — 4096 on this host, against a model declaring 131072. Raising it
+means changing the server or the model, not the request.
+
+**The failure is loud, which matters more than the limit.** The worry was a
+truncated prompt producing a confident wrong answer, because a citation
+verifies against the whole file whatever the worker was actually shown, so
+nothing downstream could catch it. What came back at 24 KB was not a wrong
+answer about the records:
+
+```json
+{ "items": [ { "item_id": 1, "item_name": "Item 1",
+               "description": "This is item 1.", "price": 10.99 }, … ] }
+```
+
+A generic product catalogue — the instruction itself was gone from what the
+model saw. `output keys are not exact` rejected it. The fixed output schema,
+which exists to make results checkable, is also what makes an over-long prompt
+fail visibly instead of quietly. Across the eight attempts every failure was of
+this kind: malformed output or none at all, never a plausible answer. That is
+eight samples, not a proof that no size produces a plausible wrong one.
 
 ### The repairs now appear in the canonical run
 
