@@ -410,6 +410,68 @@ succeeded at 4096 with an answer of 38 completion tokens."
                    (sort (delete-dups (mapcar (lambda (r) (plist-get r :path)) kept))
                          #'string<)))))
 
+(ert-deftest nl-agent-bulk-reader-test-span-covering-the-file-is-dropped ()
+  ;; Measured: one worker cited lines 1-72 of a 72-line file.  The reference
+  ;; verifies, it is a single reference so no per-path cap binds, and 72 is
+  ;; under the 80-line budget — yet the delegated prompt came out at 109% of
+  ;; the direct one.  A citation covering its source points at nothing.
+  (let* ((sources (list (list :path "big.txt" :sha256 (make-string 64 ?d)
+                              :text (mapconcat #'identity (make-list 72 "y") "\n")
+                              :line-count 72)))
+         (refs (concat "[{\"path\":\"big.txt\",\"start_line\":1,\"end_line\":72},"
+                       "{\"path\":\"big.txt\",\"start_line\":58,\"end_line\":59}]"))
+         (result (nl-agent-bulk-reader--validate-output
+                  nil (format "{\"answer\":\"x\",\"references\":%s,\"not_found\":false}" refs)
+                  sources))
+         (repair (plist-get result :reference-repair)))
+    (should (= 1 (length (plist-get result :references))))
+    (should (= 58 (plist-get (car (plist-get result :references)) :start-line)))
+    (should (memq 'over-span-fraction (plist-get repair :reasons)))))
+
+(ert-deftest nl-agent-bulk-reader-test-span-covering-the-file-alone-fails ()
+  ;; A worker whose only citation is the whole file has said the answer is in
+  ;; there somewhere.  Failing costs a fallback; accepting costs the same read
+  ;; plus the worker.
+  (let ((sources (list (list :path "big.txt" :sha256 (make-string 64 ?d)
+                             :text (mapconcat #'identity (make-list 72 "y") "\n")
+                             :line-count 72))))
+    (should-error
+     (nl-agent-bulk-reader--validate-output
+      nil (concat "{\"answer\":\"x\",\"references\":"
+                  "[{\"path\":\"big.txt\",\"start_line\":1,\"end_line\":72}],"
+                  "\"not_found\":false}")
+      sources))))
+
+(ert-deftest nl-agent-bulk-reader-test-span-fraction-boundary ()
+  ;; Half the file is kept, one line more is not.  The widest span any worker
+  ;; produced legitimately covered 14% of its source, so the boundary sits far
+  ;; from anything observed and the exact value is not load-bearing.
+  (let ((sources (list (list :path "big.txt" :sha256 (make-string 64 ?d)
+                             :text (mapconcat #'identity (make-list 40 "y") "\n")
+                             :line-count 40))))
+    (cl-flet ((kept (end)
+                (length (plist-get
+                         (nl-agent-bulk-reader--validate-output
+                          nil (format (concat "{\"answer\":\"x\",\"references\":"
+                                              "[{\"path\":\"big.txt\",\"start_line\":1,"
+                                              "\"end_line\":%d}],\"not_found\":false}")
+                                      end)
+                          sources)
+                         :references))))
+      (should (= 1 (kept 20)))
+      (should-error (kept 21))))
+  ;; And the floor: half of a short file is a couple of lines, which is what a
+  ;; normal answer cites, so the fraction must not bite there.
+  (let ((sources (list (list :path "tiny.txt" :sha256 (make-string 64 ?e)
+                             :text "one\ntwo\nthree\n" :line-count 3))))
+    (should (= 1 (length (plist-get
+                          (nl-agent-bulk-reader--validate-output
+                           nil (concat "{\"answer\":\"x\",\"references\":"
+                                       "[{\"path\":\"tiny.txt\",\"start_line\":1,"
+                                       "\"end_line\":2}],\"not_found\":false}")
+                           sources)
+                          :references))))))
+
 (ert-deftest nl-agent-bulk-reader-test-repair-refuses-when-nothing-survives ()
   ;; Every citation invented and the answer claims to have found something:
   ;; repairing this into a success would convert a fabrication into a result.

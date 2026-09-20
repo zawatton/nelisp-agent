@@ -34,9 +34,10 @@ question, not a claim that the class has been made safe.  See
   '(malformed unknown-path out-of-range)
   "Reader repair reasons that mean a citation was invented rather than trimmed.
 
-The remaining reasons — `over-reference-limit', `over-quoted-lines' and
-`over-path-limit' — drop references that verified perfectly well and were cut
-to a budget, which says nothing about the worker's honesty.")
+The remaining reasons — `over-reference-limit', `over-quoted-lines',
+`over-path-limit' and `over-span-fraction' — drop references that verified
+perfectly well and were cut to a budget, which says nothing about the worker's
+honesty.")
 
 (cl-defstruct (nl-agent-bulk-policy (:constructor nl-agent-bulk-policy--make))
   mode min-source-bytes max-paths max-question-bytes fallback absence-markers

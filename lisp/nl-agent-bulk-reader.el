@@ -26,6 +26,31 @@ observed.  Capping per path rather than in total is not a detail — dropping a
 whole path makes a correct multi-file answer fail the coverage screen, which
 was measured before this limit was added.")
 (defconst nl-agent-bulk-reader-max-quoted-lines 80)
+(defconst nl-agent-bulk-reader-max-span-fraction 0.5
+  "How much of its own source one reference may span.
+
+A citation covering its file points at nothing, and it defeats the exchange:
+measured, a worker cited lines 1-72 of a 72-line file and the delegated prompt
+came out at 109% of the direct one — the main model read the source anyway and
+a worker was paid on top.  Nothing else caught it.  The reference verified,
+being a single reference no per-path cap bound it, and 72 lines sat under the
+80-line budget because the file was shorter than the budget.
+
+The value is not delicate.  Across 30 references kept by three workers, 29
+spanned 1% to 14% of their source and one spanned 100%; the threshold sits in
+an empty gap.  See `nl-agent-bulk-reader-min-wide-span-lines' for why a
+fraction alone is not enough.")
+
+(defconst nl-agent-bulk-reader-min-wide-span-lines 8
+  "How many lines a span must reach before its fraction is held against it.
+
+Half of a short file is a couple of lines, and a couple of lines is what a
+normal answer cites, so the fraction alone rejects ordinary citations of small
+sources — it did, on this module's own fixtures, the moment it was added.  The
+widest span any worker produced legitimately was 8 lines, so a span at or
+under that is never treated as covering its source however short the source
+is.  A file large enough for the fraction to matter is unaffected: at 109
+lines the fraction permits 54.")
 (defconst nl-agent-bulk-reader-policy-version "bulk-reader-v1")
 (defconst nl-agent-bulk-reader--json-null (make-symbol "json-null"))
 
@@ -213,6 +238,21 @@ was measured before this limit was added.")
        ((null source) 'unknown-path)
        ((> end (plist-get source :line-count)) 'out-of-range)))))
 
+(defun nl-agent-bulk-reader--span-too-wide-p (ref sources)
+  "Return non-nil when REF spans more of its source than a citation should.
+REF has already been checked by `nl-agent-bulk-reader--reference-defect', so
+its path and range are known good."
+  (let* ((path (nl-agent-bulk-reader--alist ref "path"))
+         (start (nl-agent-bulk-reader--alist ref "start_line"))
+         (end (nl-agent-bulk-reader--alist ref "end_line"))
+         (total (plist-get (cl-find path sources :key (lambda (x) (plist-get x :path))
+                                    :test #'equal)
+                           :line-count)))
+    (and (integerp total) (> total 0)
+         (> (1+ (- end start))
+            (max nl-agent-bulk-reader-min-wide-span-lines
+                 (floor (* nl-agent-bulk-reader-max-span-fraction total)))))))
+
 (defun nl-agent-bulk-reader--validate-output (_reader output sources)
   "Validate OUTPUT against SOURCES, keeping only references that verify.
 
@@ -244,6 +284,8 @@ still fails, because an uncited answer is what this module exists to refuse."
            ((>= (gethash (nl-agent-bulk-reader--alist ref "path") per-path 0)
                 nl-agent-bulk-reader-max-references-per-path)
             (cl-pushnew 'over-path-limit reasons))
+           ((nl-agent-bulk-reader--span-too-wide-p ref sources)
+            (cl-pushnew 'over-span-fraction reasons))
            (t
             (let* ((path (nl-agent-bulk-reader--alist ref "path"))
                    (start (nl-agent-bulk-reader--alist ref "start_line"))

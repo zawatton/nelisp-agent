@@ -134,9 +134,9 @@ answer is not usable without fallback or human correction.
     verified — `malformed`, `unknown-path` or `out-of-range` — and says how
     many were emitted, how many survived and which of those reasons applied.
   - The reader's own budgets (`over-reference-limit`, `over-quoted-lines`,
-    `over-path-limit`) also drop references, but those verified and were cut to
-    a limit, so they never raise this code. Mixing the two would teach a host
-    to ignore it.
+    `over-path-limit`, `over-span-fraction`) also drop references, but those
+    verified and were cut to a limit, so they never raise this code. Mixing the
+    two would teach a host to ignore it.
   - A note, not a rejection: what survives is verified source text, so the
     answer keeps its support and a fallback would buy nothing. The record is
     about the worker, and on the measured corpus it distinguished a worker that
@@ -1641,6 +1641,51 @@ unchanged — it cites one span, so no cap binds.
 Taken with the repair, main input for this worker fell from 16,915 B to 7,379 B
 across the five cases, and the price ratio the arrangement requires fell from
 4.23 to 1.70.
+
+### A citation that covers its file points at nothing
+
+The per-path cap counts references. One worker got around it with a single
+reference spanning lines 1 to 72 of a 72-line file, and nothing caught it: the
+range verifies, one reference binds no per-path cap, and 72 lines sit under the
+80-line budget because the file is shorter than the budget. The delegated
+prompt came out at **109% of the direct one** — the main model read the source
+anyway and a worker was paid on top.
+
+Span, as a fraction of the file it cites, separates the two behaviours
+completely. Across 30 references kept by three workers over seven cases:
+
+```
+1% ×9   2% ×3   3% ×5   4% ×3   7% ×6   14% ×2   …   100% ×1
+```
+
+Twenty-nine between 1% and 14%, one at 100%, nothing between. So a reference
+may span at most **half** its source, a threshold sitting in the middle of an
+empty gap and 3.5× above the widest legitimate span seen.
+
+A fraction alone is wrong, and this module's own fixtures said so immediately.
+Half of a three-line file is one line, and two lines is what a normal answer
+cites, so the rule rejected ordinary citations of small sources. The reasoning
+that dismissed this beforehand — that `min-source-bytes` keeps small sources
+away — was simply wrong: the reader does not know that threshold, and nothing
+stops a host from lowering it. A span of **8 lines or fewer** is therefore
+never held to be too wide, 8 being the widest any worker produced legitimately.
+At 109 lines the fraction permits 54, so large files are unaffected.
+
+Live, on the worker and case that produced the defect:
+
+| | main input | of direct |
+| --- | ---: | ---: |
+| Before | 15,535 B | 44% |
+| After | 9,921 B | 28% |
+
+The one case went from 6,758 B to 1,147 B, `M/D` from 109% to 19%. The other
+six moved by 3 bytes in total, which is the elapsed-time text. One reference
+dropped, `over-span-fraction` recorded, the narrow citation that held the
+answer kept.
+
+When such a span is the only reference the result fails and the fallback runs,
+which is the right price: a worker whose sole citation is the whole file has
+said the answer is in there somewhere.
 
 ### Trimming is not fabricating
 
