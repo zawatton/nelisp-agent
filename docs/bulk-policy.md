@@ -233,6 +233,48 @@ The absence screens no longer fire on a *correct* absence answer: an answer
 that itself reports the absence is exempt, since it agrees with the cited line
 rather than contradicting it.
 
+### A claim with no digits is not checked against its own citation, and will not be
+
+`unsupported-numeral` asks whether a number the answer states appears in the
+text the worker cited. Nothing asks it of a value without digits, and the gap
+is wide: an answer reading 保守担当は第三技術課です, citing the line that says
+第二技術課, comes back `accept-for-review` with no diagnostic at all. So does
+保守担当は山田電気工事です. The same answer with a digit in it is caught.
+
+That screen was built. It extracts the answer's field claims the way the field
+rival screen does and asks whether the cited text states each value. Calibrated
+against 35 live answers from three workers it fired **nine times, eight of them
+on answers that were correct**:
+
+| Answer | Its own citation | |
+| --- | --- | --- |
+| 第二書庫に保管**されています** | 第二書庫に保管**しています** | passive voice |
+| 実施日は7月3日**、**停電時間は2時間です | 実施日は7月3日**で、**停電時間は2時間です | one character |
+| 500Lと750Lの2つの記録があります | 容量は 500L です / 容量は 750L です | a synthesis |
+| 手順2の文言は実行しないでください | 印字された文言は過去の誤記であり、実行対象ではありません | a conclusion |
+
+The rate tracked **answer style, not correctness**: the worker that answers in
+full sentences fired on 6 of 12, the one that answers with bare values on 1 of
+11. A screen whose false-positive rate is set by how a model phrases itself
+cannot be used to judge whether it is right.
+
+Narrower variants were worked through and each fails on a shape that matters.
+Requiring a shared substring stops firing on 第三技術課 against 第二技術課,
+which share 技術課です. Comparing only the head of the value up to the first
+particle rescues the paraphrases and the one-character case, and still fires on
+both the synthesis and the conclusion — which are what a good worker produces
+on a hard question, exactly where a screen being wrong is most expensive.
+
+It was withdrawn rather than shipped switched off. The reason it need not exist
+is architectural: **the main model already has this evidence.** The delegated
+prompt carries the worker's answer and the text of every reference side by
+side, so an answer contradicting its own citation is visible to the model that
+reads it. The screens here exist for what the main model cannot see — a rival
+value in a source the worker did not cite, a path left uncovered, a citation
+that points outside the file. Re-deriving a judgement the main model is already
+positioned to make buys nothing and, measured, costs eight false alarms in
+nine.
+
 ## Detecting a disagreement the answer does not report
 
 The excluded-kind measurement left one clear gap: a worker answers a
