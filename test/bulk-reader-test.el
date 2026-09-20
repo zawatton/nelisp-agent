@@ -251,6 +251,138 @@ succeeded at 4096 with an answer of 38 completion tokens."
         (should (eq (plist-get result :status) 'failed))
         (should-not (string-match-p "secret" (prin1-to-string result)))))))
 
+;;; Reference repair.
+;;
+;; A worker that answers correctly and then pads its citation list used to lose
+;; the whole result, so the main model paid for the worker and read the source
+;; itself afterwards.  Unverifiable references are now dropped and counted
+;; instead, with one rule that is not negotiable: if nothing survives, the
+;; result still fails, because an answer with no verifiable citation is exactly
+;; what this module exists to refuse.
+
+(defconst nl-agent-bulk-reader-test--repair-sources
+  '((:path "sample.txt"
+     :sha256 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     :text "one\ntwo\nthree\n" :line-count 3)))
+
+(defun nl-agent-bulk-reader-test--refs (&rest specs)
+  "Build a references JSON array from SPECS, each (START . END)."
+  (concat "["
+          (mapconcat (lambda (spec)
+                       (format "{\"path\":\"sample.txt\",\"start_line\":%d,\"end_line\":%d}"
+                               (car spec) (cdr spec)))
+                     specs ",")
+          "]"))
+
+(defun nl-agent-bulk-reader-test--validate (refs &optional not-found)
+  (nl-agent-bulk-reader--validate-output
+   nil (format "{\"answer\":\"x\",\"references\":%s,\"not_found\":%s}"
+               refs (if not-found "true" "false"))
+   nl-agent-bulk-reader-test--repair-sources))
+
+(ert-deftest nl-agent-bulk-reader-test-repair-drops-unverifiable-reference ()
+  (let* ((result (nl-agent-bulk-reader-test--validate
+                  (nl-agent-bulk-reader-test--refs '(1 . 1) '(9 . 9))))
+         (repair (plist-get result :reference-repair)))
+    (should (equal "x" (plist-get result :answer)))
+    (should (= 1 (length (plist-get result :references))))
+    (should (equal "one" (plist-get (car (plist-get result :references)) :text)))
+    (should (= 2 (plist-get repair :emitted)))
+    (should (= 1 (plist-get repair :kept)))
+    (should (memq 'out-of-range (plist-get repair :reasons)))))
+
+(ert-deftest nl-agent-bulk-reader-test-repair-names-an-uncited-file ()
+  ;; Citing a file that was never read is a different defect from citing a
+  ;; line that does not exist, and the record says which it was.
+  (let* ((result (nl-agent-bulk-reader--validate-output
+                  nil
+                  (concat "{\"answer\":\"x\",\"references\":["
+                          "{\"path\":\"sample.txt\",\"start_line\":1,\"end_line\":1},"
+                          "{\"path\":\"never-read.txt\",\"start_line\":1,\"end_line\":1}],"
+                          "\"not_found\":false}")
+                  nl-agent-bulk-reader-test--repair-sources))
+         (repair (plist-get result :reference-repair)))
+    (should (= 1 (length (plist-get result :references))))
+    (should (equal '(unknown-path) (plist-get repair :reasons)))))
+
+(ert-deftest nl-agent-bulk-reader-test-repair-drops-malformed-reference ()
+  (let* ((result (nl-agent-bulk-reader--validate-output
+                  nil
+                  (concat "{\"answer\":\"x\",\"references\":["
+                          "{\"path\":\"sample.txt\",\"start_line\":1,\"end_line\":1},"
+                          "{\"path\":\"sample.txt\",\"start_line\":1,\"end_line\":1,\"extra\":1}],"
+                          "\"not_found\":false}")
+                  nl-agent-bulk-reader-test--repair-sources))
+         (repair (plist-get result :reference-repair)))
+    (should (= 1 (length (plist-get result :references))))
+    (should (= 2 (plist-get repair :emitted)))
+    (should (memq 'malformed (plist-get repair :reasons)))))
+
+(ert-deftest nl-agent-bulk-reader-test-repair-truncates-overlong-list ()
+  ;; The 8.5 KB live case: sixteen references, one of them real.  The old
+  ;; length check rejected the result before looking at any of them.
+  (let* ((specs (cons '(2 . 2) (make-list 15 '(40 . 47))))
+         (result (apply #'nl-agent-bulk-reader-test--refs specs))
+         (result (nl-agent-bulk-reader-test--validate result))
+         (repair (plist-get result :reference-repair)))
+    (should (= 1 (length (plist-get result :references))))
+    (should (equal "two" (plist-get (car (plist-get result :references)) :text)))
+    (should (= 16 (plist-get repair :emitted)))
+    (should (= 1 (plist-get repair :kept)))))
+
+(ert-deftest nl-agent-bulk-reader-test-repair-keeps-the-reference-limit ()
+  ;; Twelve citations that all verify: the limit still caps the list, but it
+  ;; now truncates instead of discarding the answer along with it.
+  (let* ((sources (list (list :path "many.txt" :sha256 (make-string 64 ?c)
+                              :text (mapconcat #'identity (make-list 12 "y") "\n")
+                              :line-count 12)))
+         (refs (concat "["
+                       (mapconcat (lambda (n)
+                                    (format "{\"path\":\"many.txt\",\"start_line\":%d,\"end_line\":%d}"
+                                            n n))
+                                  (number-sequence 1 12) ",")
+                       "]"))
+         (result (nl-agent-bulk-reader--validate-output
+                  nil (format "{\"answer\":\"x\",\"references\":%s,\"not_found\":false}" refs)
+                  sources))
+         (repair (plist-get result :reference-repair)))
+    (should (= nl-agent-bulk-reader-max-references
+               (length (plist-get result :references))))
+    (should (= 12 (plist-get repair :emitted)))
+    (should (memq 'over-reference-limit (plist-get repair :reasons)))))
+
+(ert-deftest nl-agent-bulk-reader-test-repair-refuses-when-nothing-survives ()
+  ;; Every citation invented and the answer claims to have found something:
+  ;; repairing this into a success would convert a fabrication into a result.
+  (should-error (nl-agent-bulk-reader-test--validate
+                 (nl-agent-bulk-reader-test--refs '(7 . 8) '(9 . 9))))
+  ;; A not_found answer legitimately carries no references, and the repair
+  ;; must not turn that into a failure either.
+  (should (equal "x" (plist-get (nl-agent-bulk-reader-test--validate "[]" t) :answer))))
+
+(ert-deftest nl-agent-bulk-reader-test-repair-absent-when-nothing-dropped ()
+  ;; The repair record travels to the main model inside the serialized result,
+  ;; so a clean worker must not pay bytes for it.
+  (let ((result (nl-agent-bulk-reader-test--validate
+                 (nl-agent-bulk-reader-test--refs '(1 . 2)))))
+    (should (= 1 (length (plist-get result :references))))
+    (should-not (plist-member result :reference-repair))))
+
+(ert-deftest nl-agent-bulk-reader-test-repair-stops-at-quoted-line-budget ()
+  ;; The budget used to abort the whole result partway through the list.
+  (let* ((sources (list (list :path "big.txt"
+                              :sha256 (make-string 64 ?b)
+                              :text (mapconcat #'identity (make-list 200 "x") "\n")
+                              :line-count 200)))
+         (refs (concat "[{\"path\":\"big.txt\",\"start_line\":1,\"end_line\":60},"
+                       "{\"path\":\"big.txt\",\"start_line\":61,\"end_line\":140}]"))
+         (result (nl-agent-bulk-reader--validate-output
+                  nil (format "{\"answer\":\"x\",\"references\":%s,\"not_found\":false}" refs)
+                  sources))
+         (repair (plist-get result :reference-repair)))
+    (should (= 1 (length (plist-get result :references))))
+    (should (memq 'over-quoted-lines (plist-get repair :reasons)))))
+
 ;;; bulk-reader-test.el ends here
 
 (when noninteractive

@@ -129,6 +129,19 @@ answer is not usable without fallback or human correction.
     `hermes3:8b` on `multi-file-negation`, which answered both facts while
     citing one of the two files.
 
+**`fabricated-references`** (severity: `fabricated-reference-screen`, default note)
+  - The reader dropped one or more references it could not verify, and says
+    how many were emitted, how many survived, and why the rest went
+    (`malformed`, `unknown-path`, `out-of-range`, `over-reference-limit`,
+    `over-quoted-lines`).
+  - A note, not a rejection: what survives is verified source text, so the
+    answer keeps its support and a fallback would buy nothing. The record is
+    about the worker, and on the measured corpus it distinguished a worker that
+    pads its citation list from two that do not. Set the slot to `reject` to
+    refuse such results, or nil to stop screening.
+  - Never fires when nothing was dropped — the reader omits the record
+    entirely, so a clean worker adds no bytes to the delegated prompt.
+
 **`absence-marker-conflict`** (severity: reject)
   - A **cited** reference contains an absence marker (e.g. 記載されていません)
     while `not-found` is nil and the answer does not itself report an absence.
@@ -1443,6 +1456,74 @@ The 3072 default holds for the three workers tested on this ladder.
 
 No token counts, prices or billing were involved; these are UTF-8 byte counts
 of the exact messages sent.
+
+## Repairing a citation list instead of losing the answer, 2026-09-20
+
+The size ladder showed the rejection fraction `f` moving `r*` further than
+source size does, and showed that the rejections were not comprehension
+failures: the answers were right and so was the first citation in each. The
+reader was discarding correct work over padding.
+
+It no longer does. A reference that cannot be checked against the source it
+names is dropped and counted; the ones that verify are kept. The per-reference
+limit and the quoted-line budget truncate the list rather than failing it. What
+was dropped travels with the result:
+
+```elisp
+:reference-repair (:emitted 16 :kept 4 :reasons (out-of-range))
+```
+
+One rule does not bend: if nothing survives and the answer claims to have found
+something, the result still fails. An uncited answer is what this module exists
+to refuse, and repairing a wholly invented citation list into a success would
+invert that.
+
+The policy reports the repair as `fabricated-references`, a note by default.
+The references still standing are verified source text, so the answer's support
+is unchanged and a fallback would buy nothing; what the record buys is a view
+of a worker that invents citations. A host that will not tolerate it can set
+`:fabricated-reference-screen 'reject`.
+
+### What it changed, same corpus and same workers
+
+`llama3.2:3b` repaired two of the five: 3 references down to 2 at 1 KB, and 16
+down to 4 at 8.5 KB, all drops `out-of-range`. Both cases had been total
+losses. A rejected delegation bills the main model `D` — it pays the worker and
+then reads the source anyway — so the comparison is main input across all five:
+
+| Worker | main input before | after | vs direct | rejects | aggregate `r*` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `llama3.2:3b` | 16,915 B | **11,427 B** | 72% → 49% | 2/5 → **0/5** | 4.23 → **2.28** |
+| `hermes3:8b` | 4,868 B | 4,869 B | 21% | 0/5 | 1.47 |
+| `qwen3:4b` | 4,551 B | 4,551 B | 19% | 0/5 | 1.45 |
+
+Direct-only main input for the five is 23,348 B and the worker prompts total
+27,185 B in every run.
+
+For the worker that needed it, main input fell 32% and the price ratio the
+arrangement requires nearly halved. All five answers are now correct and usable,
+where three were before — comprehension was always 15 of 15, and this is the
+part of that which the host can now actually use.
+
+The two workers that cite one span are **unchanged**, which is the design
+working: no repair record is emitted when nothing was dropped, so a clean
+worker pays no bytes for the mechanism. The one-byte differences in their rows
+are not content. The serialized result carries the worker's `:elapsed-seconds`,
+and a float prints to a different width from run to run, so `M` is reproducible
+only to within a byte or two. Nothing here depends on that resolution.
+
+### What this does not settle
+
+Keeping four references at 8.5 KB means the main model reads 32 quoted lines,
+and `M` rose from 639 B to 3,868 B for that case. Keeping only the first
+verifying reference would be cheaper and is not obviously worse, since the
+answer needs one anchor, not four. That variant has not been measured.
+
+The repair was exercised on one worker in one corpus. A worker that invents a
+citation which happens to land inside the file would pass this check — the
+reference verifies, it is simply the wrong span, and nothing here detects that.
+The coverage and disagreement screens are what stand between that and a wrong
+answer, and they were not changed.
 
 ## Not measured
 

@@ -185,35 +185,79 @@
   (or (alist-get key object nil nil #'equal)
       (alist-get (intern key) object nil nil #'eq)))
 
+(defun nl-agent-bulk-reader--reference-defect (ref sources)
+  "Return nil when REF can be verified against SOURCES, else why it cannot."
+  (if (not (and (listp ref) (= (length ref) 3)
+                (equal (sort (mapcar (lambda (x) (symbol-name (car x))) ref) #'string<)
+                       '("end_line" "path" "start_line"))))
+      'malformed
+    (let* ((path (nl-agent-bulk-reader--alist ref "path"))
+           (start (nl-agent-bulk-reader--alist ref "start_line"))
+           (end (nl-agent-bulk-reader--alist ref "end_line"))
+           (source (and (stringp path)
+                        (cl-find path sources :key (lambda (x) (plist-get x :path))
+                                 :test #'equal))))
+      (cond
+       ((not (and (stringp path) (integerp start) (integerp end) (<= 1 start end)))
+        'malformed)
+       ((null source) 'unknown-path)
+       ((> end (plist-get source :line-count)) 'out-of-range)))))
+
 (defun nl-agent-bulk-reader--validate-output (_reader output sources)
+  "Validate OUTPUT against SOURCES, keeping only references that verify.
+
+A reference that cannot be checked against the source it names is dropped
+rather than failing the whole result, and what was dropped is reported under
+`:reference-repair' so the caller can see it and price it.  Measurement is the
+reason: workers answered correctly and then padded the citation list, and
+losing those results made the main model pay for the worker and then read the
+source itself.  The rule that does not bend is the last one here — if no
+reference survives and the answer claims to have found something, the result
+still fails, because an uncited answer is what this module exists to refuse."
   (let* ((object (nl-agent-bulk-reader--json-object output))
          (answer (nl-agent-bulk-reader--alist object "answer"))
          (refs (nl-agent-bulk-reader--alist object "references"))
          (not-found (nl-agent-bulk-reader--alist object "not_found")))
     (unless (and (stringp answer) (<= (length answer) nl-agent-bulk-reader-max-answer-chars)) (error "invalid answer"))
     (unless (memq not-found '(t :false)) (error "invalid not_found"))
-    (unless (and (vectorp refs) (<= (length refs) nl-agent-bulk-reader-max-references)) (error "invalid references"))
+    (unless (vectorp refs) (error "invalid references"))
     (when (string-empty-p (string-trim answer)) (error "empty answer"))
     (when (and (eq not-found :false) (= (length refs) 0)) (error "answer requires references"))
-    (let ((result nil) (quoted 0))
+    (let ((result nil) (quoted 0) (emitted (length refs)) (reasons nil))
       (dolist (ref (append refs nil))
-        (unless (and (listp ref) (= (length ref) 3)
-                     (equal (sort (mapcar (lambda (x) (symbol-name (car x))) ref) #'string<)
-                            '("end_line" "path" "start_line")))
-          (error "invalid reference"))
-        (let ((path (nl-agent-bulk-reader--alist ref "path"))
-              (start (nl-agent-bulk-reader--alist ref "start_line"))
-              (end (nl-agent-bulk-reader--alist ref "end_line")))
-          (unless (and (stringp path) (integerp start) (integerp end) (<= 1 start end)) (error "invalid reference location"))
-          (let* ((source (cl-find path sources :key (lambda (x) (plist-get x :path)) :test #'equal))
-                 (count (and source (plist-get source :line-count))))
-            (unless (and source (<= end count)) (error "reference path or range invalid"))
-            (setq quoted (+ quoted (1+ (- end start))))
-            (when (> quoted nl-agent-bulk-reader-max-quoted-lines) (error "too many quoted lines"))
-            (push (list :path path :start-line start :end-line end
-                        :sha256 (plist-get source :sha256)
-                        :text (nl-agent-bulk-reader--line-text (plist-get source :text) start end)) result))))
-      (list :answer answer :references (nreverse result) :not-found (eq not-found t)))))
+        (let ((defect (nl-agent-bulk-reader--reference-defect ref sources)))
+          (cond
+           (defect (cl-pushnew defect reasons))
+           ((>= (length result) nl-agent-bulk-reader-max-references)
+            (cl-pushnew 'over-reference-limit reasons))
+           (t
+            (let* ((path (nl-agent-bulk-reader--alist ref "path"))
+                   (start (nl-agent-bulk-reader--alist ref "start_line"))
+                   (end (nl-agent-bulk-reader--alist ref "end_line"))
+                   (source (cl-find path sources :key (lambda (x) (plist-get x :path))
+                                    :test #'equal))
+                   (lines (1+ (- end start))))
+              ;; The quoted-line budget stops the list here instead of failing
+              ;; it; references already accepted stay accepted.
+              (if (> (+ quoted lines) nl-agent-bulk-reader-max-quoted-lines)
+                  (cl-pushnew 'over-quoted-lines reasons)
+                (setq quoted (+ quoted lines))
+                (push (list :path path :start-line start :end-line end
+                            :sha256 (plist-get source :sha256)
+                            :text (nl-agent-bulk-reader--line-text
+                                   (plist-get source :text) start end))
+                      result)))))))
+      (setq result (nreverse result))
+      (when (and (eq not-found :false) (null result))
+        (error "no verifiable reference survived"))
+      (append (list :answer answer :references result :not-found (eq not-found t))
+              ;; Absent when nothing was dropped: this record travels to the
+              ;; main model inside the serialized result, so a clean worker
+              ;; must not pay bytes for it.
+              (when reasons
+                (list :reference-repair
+                      (list :emitted emitted :kept (length result)
+                            :reasons (nreverse reasons))))))))
 
 ;;;###autoload
 (defun nl-agent-bulk-reader-run (reader question paths)
@@ -262,6 +306,8 @@
                           :answer (plist-get validated :answer)
                           :references (plist-get validated :references)
                           :not-found (plist-get validated :not-found))
+                    (when (plist-member validated :reference-repair)
+                      (list :reference-repair (plist-get validated :reference-repair)))
                     (list :metrics (list :role 'bulk-reader :policy-version nl-agent-bulk-reader-policy-version
                                           :request-content-utf8-bytes
                                           request-bytes

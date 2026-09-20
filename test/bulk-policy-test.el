@@ -1242,5 +1242,70 @@ having omitted it."
                                      :source-bytes 3072 :question-kind fact))
                            :reason)))))
 
+;;; Fabricated references.
+;;
+;; The reader drops citations it cannot verify instead of losing the whole
+;; result.  What survives is verified text, so the answer is no less supported
+;; than any other accepted answer, but how much the worker invented is a signal
+;; about the worker and the host should be able to see it and to act on it.
+
+(defun nl-agent-bulk-policy-test--repair-diagnose (repair &rest keys)
+  "Diagnose a worker result carrying REPAIR, under a policy built from KEYS."
+  (let ((policy (apply #'nl-agent-bulk-policy-new
+                       (append '(:mode opt-in :min-source-bytes 0) keys))))
+    (nl-agent-bulk-policy-diagnose
+     policy
+     (list :question "鍵はどこですか" :paths '("a.txt") :source-bytes 10000
+           :question-kind 'fact
+           :sources '((:path "a.txt" :text "予備品倉庫の鍵は事務所金庫にあります。\n")))
+     (append
+      (list :status 'needs-review :answer "事務所金庫" :not-found nil :metrics nil
+            :references (list (list :path "a.txt" :start-line 1 :end-line 1
+                                    :sha256 (make-string 64 ?a)
+                                    :text "予備品倉庫の鍵は事務所金庫にあります。")))
+      (when repair (list :reference-repair repair))))))
+
+(defun nl-agent-bulk-policy-test--fabricated-code (diag)
+  (cl-find 'fabricated-references (plist-get diag :diagnostics)
+           :key (lambda (d) (plist-get d :code))))
+
+(ert-deftest nl-agent-bulk-policy-test-fabricated-references-noted ()
+  "Fifteen invented citations out of sixteen is reported, not hidden.
+The one surviving reference is verified source text, so the answer keeps its
+support; what the host learns is that this worker padded the list."
+  (let* ((diag (nl-agent-bulk-policy-test--repair-diagnose
+                '(:emitted 16 :kept 1 :reasons (out-of-range over-reference-limit))))
+         (code (nl-agent-bulk-policy-test--fabricated-code diag)))
+    (should code)
+    (should (eq 'note (plist-get code :severity)))
+    (should (string-match-p "16" (plist-get code :detail)))
+    (should (string-match-p "out-of-range" (plist-get code :detail)))
+    ;; A note must not cost a fallback.
+    (should (eq 'accept-for-review (plist-get diag :disposition)))))
+
+(ert-deftest nl-agent-bulk-policy-test-fabricated-references-can-reject ()
+  "A host that will not tolerate invented citations can still reject them."
+  (let* ((diag (nl-agent-bulk-policy-test--repair-diagnose
+                '(:emitted 16 :kept 1 :reasons (out-of-range))
+                :fabricated-reference-screen 'reject))
+         (code (nl-agent-bulk-policy-test--fabricated-code diag)))
+    (should (eq 'reject (plist-get code :severity)))
+    (should (eq 'reject (plist-get diag :disposition)))))
+
+(ert-deftest nl-agent-bulk-policy-test-fabricated-references-silent-when-clean ()
+  (should-not (nl-agent-bulk-policy-test--fabricated-code
+               (nl-agent-bulk-policy-test--repair-diagnose nil)))
+  (should-not (nl-agent-bulk-policy-test--fabricated-code
+               (nl-agent-bulk-policy-test--repair-diagnose
+                '(:emitted 16 :kept 1 :reasons (out-of-range))
+                :fabricated-reference-screen nil)))
+  ;; A record that reports nothing dropped is not a fabrication, whoever built
+  ;; it.  The reader does not emit this shape, which is why the guard needs a
+  ;; test of its own rather than relying on the reader's contract.
+  (should-not (nl-agent-bulk-policy-test--fabricated-code
+               (nl-agent-bulk-policy-test--repair-diagnose
+                '(:emitted 3 :kept 3 :reasons nil))))
+  (should-error (nl-agent-bulk-policy-new :fabricated-reference-screen 'maybe)))
+
 (when noninteractive
   (ert-run-tests-batch-and-exit))

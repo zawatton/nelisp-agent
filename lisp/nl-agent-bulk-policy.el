@@ -34,7 +34,7 @@ question, not a claim that the class has been made safe.  See
   mode min-source-bytes max-paths max-question-bytes fallback absence-markers
   numeral-screen excluded-question-kinds require-question-kind
   uncited-absence-screen coverage-overlap-chars rival-value-screen
-  rival-uncalibrated-severity field-rival-screen)
+  rival-uncalibrated-severity field-rival-screen fabricated-reference-screen)
 
 (defun nl-agent-bulk-policy--validate-keys (keys allowed where)
   (unless (and (listp keys) (proper-list-p keys) (= 0 (% (length keys) 2)))
@@ -67,12 +67,18 @@ question, not a claim that the class has been made safe.  See
         (coverage-overlap-chars 8)
         (rival-value-screen 'reject)
         (rival-uncalibrated-severity 'note)
-        (field-rival-screen 'reject))
+        (field-rival-screen 'reject)
+        ;; A note by default: what survives the reader's repair is verified
+        ;; source text, so the answer keeps its support and a fallback would
+        ;; buy nothing.  What the record buys is visibility into a worker
+        ;; that invents citations, which is the measured cost driver.
+        (fabricated-reference-screen 'note))
     (nl-agent-bulk-policy--validate-keys keys
       '(:mode :min-source-bytes :max-paths :max-question-bytes :fallback :absence-markers
         :numeral-screen :excluded-question-kinds :require-question-kind
         :uncited-absence-screen :coverage-overlap-chars :rival-value-screen
-        :rival-uncalibrated-severity :field-rival-screen)
+        :rival-uncalibrated-severity :field-rival-screen
+        :fabricated-reference-screen)
       "nl-agent-bulk-policy-new")
     (while keys
       (pcase (pop keys)
@@ -90,7 +96,9 @@ question, not a claim that the class has been made safe.  See
         (:rival-value-screen (setq rival-value-screen (pop keys)))
         (:rival-uncalibrated-severity
          (setq rival-uncalibrated-severity (pop keys)))
-        (:field-rival-screen (setq field-rival-screen (pop keys)))))
+        (:field-rival-screen (setq field-rival-screen (pop keys)))
+        (:fabricated-reference-screen
+         (setq fabricated-reference-screen (pop keys)))))
     (unless (memq mode '(direct-only opt-in)) (error "mode must be direct-only or opt-in, got %S" mode))
     (unless (and (integerp min-source-bytes) (>= min-source-bytes 0) (<= min-source-bytes 131072))
       (error "min-source-bytes must be 0..131072, got %S" min-source-bytes))
@@ -128,6 +136,9 @@ question, not a claim that the class has been made safe.  See
              rival-uncalibrated-severity))
     (unless (memq field-rival-screen '(reject note nil))
       (error "field-rival-screen must be reject, note or nil, got %S" field-rival-screen))
+    (unless (memq fabricated-reference-screen '(reject note nil))
+      (error "fabricated-reference-screen must be reject, note or nil, got %S"
+             fabricated-reference-screen))
     (nl-agent-bulk-policy--make :mode mode :min-source-bytes min-source-bytes :max-paths max-paths
                                  :max-question-bytes max-question-bytes :fallback fallback
                                  :absence-markers absence-markers :numeral-screen numeral-screen
@@ -137,7 +148,9 @@ question, not a claim that the class has been made safe.  See
                                  :coverage-overlap-chars coverage-overlap-chars
                                  :rival-value-screen rival-value-screen
                                  :rival-uncalibrated-severity rival-uncalibrated-severity
-                                 :field-rival-screen field-rival-screen)))
+                                 :field-rival-screen field-rival-screen
+                                 :fabricated-reference-screen
+                                 fabricated-reference-screen)))
 
 (defun nl-agent-bulk-policy--validate-request (request)
   (unless (and (listp request) (proper-list-p request)) (error "request must be a proper list"))
@@ -670,6 +683,22 @@ value anyway is exempt too, which is a known limitation recorded in
 (setq disposition 'reject))
 (t (push ref valid-refs))))
           (setq references (nreverse valid-refs)))
+        ;; The reader drops citations it cannot verify rather than losing a
+        ;; correct answer with them, and says so under `:reference-repair'.
+        ;; Surface that here: the references still standing are verified text,
+        ;; so this is a statement about the worker, not about the answer.
+        (let ((repair (plist-get result :reference-repair))
+              (screen (nl-agent-bulk-policy-fabricated-reference-screen policy)))
+          (when (and screen (plist-get repair :emitted)
+                     (> (plist-get repair :emitted) (or (plist-get repair :kept) 0)))
+            (push (list :code 'fabricated-references :severity screen
+                        :detail (format "Worker emitted %d references, %d verified; dropped: %s"
+                                        (plist-get repair :emitted)
+                                        (or (plist-get repair :kept) 0)
+                                        (mapconcat #'symbol-name
+                                                   (plist-get repair :reasons) ", ")))
+                  diagnostics)
+            (when (eq screen 'reject) (setq disposition 'reject))))
         (when (and (not not-found) (> (length paths) 1))
           (let ((ref-paths (delete-dups (mapcar (lambda (ref) (plist-get ref :path)) references)))
                 (uncovered nil))
