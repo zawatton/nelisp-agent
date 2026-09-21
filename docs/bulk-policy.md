@@ -36,6 +36,13 @@ ones; the worker reads the whole file either way. Delegation pays only when
 the two models are priced differently, and `r*` falls towards 1.01 as the
 source grows but never below it — the arrangement is never free.
 
+**The quality numbers come from corpora I wrote, and do not survive contact
+with real records.** Across the synthetic ladders the worker answered 15 of 15;
+on four of the operator's own technical notes it answered 2 of 4, against 3 of
+4 for reading directly, and the rival screen — calibrated to zero false
+positives over 42 synthetic cases — rejected one correct answer. The byte
+results carried over unchanged. See "Real notes".
+
 **The citation machinery is what makes a delegated answer usable**, and its
 failure mode is not what it looks like. Workers answered correctly and then
 padded their citation lists with invented line numbers; discarding those
@@ -2097,6 +2104,62 @@ The exercise arm admitted 12 of 20 and refused 8 on question kind; 10 finished
 delegated, 2 were rejected and fell back. Diagnostics across the run:
 `fabricated-references` 2, `absence-marker-conflict` 1,
 `partial-source-coverage` 1.
+
+## Real notes, 2026-09-21
+
+Every corpus above is one I wrote. Their filler was built to carry no rival
+values, and each has a single fact at a chosen depth. Real technical notes are
+not like that, so the same measurement was run against four of the operator's
+own records — headings, tables, links, LaTeX, and the same number meaning
+different things in different places. Sizes span the payable band: 17.6, 25.6,
+28.5 and 57.6 KB. The content stays out of this document; only measurements
+are reported.
+
+| Source | `D` | `M` | `W` | `M/D` | `r*` | Direct | Worker | Worker time |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: |
+| 17.6 KB | 20,734 | 644 | 22,268 | 3% | 1.11 | wrong | failed | 891 s |
+| 25.6 KB | 29,886 | 1,073 | 31,411 | 4% | 1.09 | right | right | 107 s |
+| 28.5 KB | 33,802 | 1,228 | 35,517 | 4% | 1.09 | right | right | 177 s |
+| 57.6 KB | 65,344 | 1,282 | 67,476 | 2% | 1.05 | right | wrong | 275 s |
+
+**The byte result carries over unchanged.** `M/D` is 2–4% and `r*` between
+1.05 and 1.11, the same as on synthetic material of the same size. These are
+measured prompt sizes, not judgements, and real structure does not disturb
+them.
+
+**Quality does not carry over.** Across the synthetic ladders the worker
+answered 15 of 15. Here it answered **2 of 4**, against 3 of 4 for reading the
+sources directly. One question defeated both: the answer sits inside a prose
+sentence beside a LaTeX block, and the direct read said it could not answer
+while the worker failed outright after fourteen minutes. On the largest note
+the worker read the wrong row of a table — the right column, the wrong
+condition — and returned a confident answer from it.
+
+**The machinery caught that one.** The wrong table answer was rejected, with
+four diagnostics including a fabricated reference to a path that does not
+exist. This is the first time on real material that the screens stopped an
+answer that was actually wrong.
+
+**And it produced a false positive.** On the 28.5 KB note the worker answered
+correctly and the rival screen rejected it anyway. That screen was calibrated
+to zero false positives across 42 synthetic cases; on the first set of real
+documents it fires wrongly on one of the three usable answers. Synthetic
+calibration did not transfer.
+
+**Latency rules out interactive use at these sizes.** The worker took 107 to
+891 seconds, the direct read 142 to 308. The worst case spent nearly fifteen
+minutes to produce nothing. Whatever the byte economics say, nothing here is
+usable while someone waits.
+
+### What this changes
+
+The cost model stands and the quality claims do not. A host reading the
+synthetic sections would expect a worker that answers nearly everything and
+screens that never fire wrongly; on real records it answered half, and the
+screens both earned their place and cost a good answer. Four questions over
+four documents is a small sample and the questions are mine, but it is the
+first evidence from outside the fixtures, and it points the other way from
+them.
 
 ## Not measured
 
