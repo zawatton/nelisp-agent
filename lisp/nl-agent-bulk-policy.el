@@ -370,8 +370,38 @@ kept the one true positive.")
     (nl-agent-bulk-policy--strip-separator-run
      (if copula (substring trimmed 0 copula) trimmed))))
 
-(defun nl-agent-bulk-policy--numeral-contexts (text)
-  "Return ((VALUE . LEFT-CONTEXT) ...) for every digit run in TEXT.
+(defconst nl-agent-bulk-policy--rival-unit
+  "[A-Za-zμΩ℃%]+\\|[年月日時分秒週回個台枚本件人かヶ間]+"
+  "Characters accepted in the compact unit immediately following a number.
+
+The corpora use Latin/SI symbols and short Japanese date, duration, and count
+units.  Restricting the token to those characters makes `1MΩ程度' yield `MΩ'
+and `1時間です' yield `時間', rather than treating the prose after the unit as
+part of it.  ASCII spaces and tabs before a Latin unit are ignored; prose and
+punctuation are not.  This is deliberately lexical rather than a conversion:
+units are compared exactly after case-folding and a small corpus-backed
+English/Japanese alias normalisation, so unlike units cannot become a candidate
+merely because their numbers match.")
+
+(defun nl-agent-bulk-policy--following-unit (text end)
+  "Return the normalised unit immediately following TEXT's digit run at END.
+An absent unit is represented by the empty string.  Only presentation spaces and
+tabs are skipped, so a unit and a bare number remain different readings."
+  (let ((tail (substring text end)))
+    (if (string-match
+         (concat "\\`[ \t]*\\(" nl-agent-bulk-policy--rival-unit "\\)")
+         tail)
+        (let ((unit (downcase (match-string 1 tail))))
+          (cond ((string-match-p "\\`months?\\'" unit) "か月")
+                ((string-match-p "\\`years?\\'" unit) "年")
+                ((string-match-p "\\`hours?\\'" unit) "時間")
+                ((string-match-p "\\`minutes?\\'" unit) "分")
+                ((string-match-p "\\`seconds?\\'" unit) "秒")
+                (t unit)))
+      "")))
+
+(defun nl-agent-bulk-policy--numeral-records (text)
+  "Return records with VALUE, UNIT, and LEFT-CONTEXT for digit runs in TEXT.
 Fullwidth digits are normalised first.  LEFT-CONTEXT reaches back at most
 `nl-agent-bulk-policy-rival-context-chars' characters and stops at the nearest
 sentence boundary, so it holds the wording that introduces this number and
@@ -397,9 +427,20 @@ nothing from the sentence before it."
              (context (string-trim-left (if cut (substring window cut) window)))
              (label marked))
         (unless label
-          (push (cons (substring norm begin end) context) result))
+          (push (list :value (substring norm begin end)
+                      :unit (nl-agent-bulk-policy--following-unit norm end)
+                      :context context)
+                result))
         (setq start end)))
     (nreverse result)))
+
+(defun nl-agent-bulk-policy--numeral-contexts (text)
+  "Return ((VALUE . LEFT-CONTEXT) ...) for every digit run in TEXT.
+The rival screen also uses the unit in each internal record; this compatibility
+view retains the historical shape for callers that only need contexts."
+  (mapcar (lambda (record)
+            (cons (plist-get record :value) (plist-get record :context)))
+          (nl-agent-bulk-policy--numeral-records text)))
 
 (defun nl-agent-bulk-policy--shared-tail (left right)
   "Return how many characters LEFT and RIGHT share, counting back from the end."
@@ -600,40 +641,68 @@ engaging with the disagreement.  Each element is (NAME STATED OMITTED PATH)."
 (defun nl-agent-bulk-policy--unreported-rivals (answer sources)
   "Return rivals of ANSWER's numbers that SOURCES state and ANSWER omits.
 
-For every number the answer asserts, the sources are searched for a different
-number introduced by the same wording.  Such a number is a rival reading of the
-same slot, and an answer that states one without the other has resolved a
-disagreement silently.  A rival the answer also mentions is not reported: an
-answer carrying both values is engaging with the disagreement rather than
-hiding it, which is checked by value rather than by looking for words like
-\"conflict\" because an answer may contain such a word while denying the
-disagreement.
+For every number and following unit the answer asserts, the sources are
+searched for a different number with the same unit, introduced by the same
+wording.  The unit is the compact measurement/date/count token immediately
+following the digits; optional formatting whitespace is ignored, and the small
+English/Japanese aliases are canonicalised, but no unit conversion is
+attempted.  This keeps `1MΩ' and `1時間' in different slots and
+keeps `250kW' and `180kW' comparable.  A missing unit is the empty token, so it
+does not agree with a present unit when two source readings are compared.  A
+bare answer may still attach to a same-valued source occurrence so the screen
+can inspect the source's units; this preserves answers whose wording omits a
+unit.  This lexical rule is used because the left context alone cannot
+distinguish the real-document false positive.
+
+Such a number is a rival reading of the same slot, and an answer that states
+one without the other has resolved a disagreement silently.  A rival the
+answer also mentions is not reported: an answer carrying both values is
+engaging with the disagreement rather than hiding it, which is checked by
+value and unit rather than by looking for words like \"conflict\" because an
+answer may contain such a word while denying the disagreement.
 
 Each element is (VALUE RIVAL PATH CONTEXT BOTH-CONTEXTS), the last being the
 two contexts joined so the caller can judge what script they are written in."
-  (let* ((answer-values (mapcar #'car (nl-agent-bulk-policy--numeral-contexts answer)))
+  (let* ((answer-values
+          (mapcar (lambda (record)
+                    (list (plist-get record :value) (plist-get record :unit)))
+                  (nl-agent-bulk-policy--numeral-records answer)))
          (entries nil)
          (found nil))
     ;; One flat list across every source: a disagreement usually lies between
     ;; two files, so comparing only within a file would miss the common case.
     (dolist (source sources)
-      (dolist (context (nl-agent-bulk-policy--numeral-contexts
-                        (or (plist-get source :text) "")))
-        (push (list (car context) (cdr context) (plist-get source :path)) entries)))
+      (dolist (record (nl-agent-bulk-policy--numeral-records
+                       (or (plist-get source :text) "")))
+        (push (list (plist-get record :value)
+                    (plist-get record :unit)
+                    (plist-get record :context)
+                    (plist-get source :path))
+              entries)))
     (setq entries (nreverse entries))
     (when answer-values
       (dolist (mine entries)
-        (when (member (car mine) answer-values)
+        (when (cl-some (lambda (answer-value)
+                         (and (equal (car answer-value) (nth 0 mine))
+                              (or (string-empty-p (cadr answer-value))
+                                  (equal (cadr answer-value) (nth 1 mine)))))
+                       answer-values)
           (dolist (other entries)
-            (unless (or (equal (car other) (car mine))
-                        (member (car other) answer-values)
-                        (assoc (car mine) found))
-              (when (nl-agent-bulk-policy--rival-contexts-p (nth 1 mine) (nth 1 other))
-                (push (list (car mine) (car other) (nth 2 other)
-                            (substring (nth 1 other)
-                                       (max 0 (- (length (nth 1 other))
+            (unless (or (and (equal (nth 0 other) (nth 0 mine))
+                             (equal (nth 1 other) (nth 1 mine)))
+                        (member (list (nth 0 other) (nth 1 other)) answer-values)
+                        (cl-some (lambda (rival)
+                                   (and (equal (nth 0 rival) (nth 0 mine))
+                                        (equal (nth 1 rival) (nth 1 mine))))
+                                 found))
+              (when (and (equal (nth 1 mine) (nth 1 other))
+                         (nl-agent-bulk-policy--rival-contexts-p
+                          (nth 2 mine) (nth 2 other)))
+                (push (list (nth 0 mine) (nth 0 other) (nth 3 other)
+                            (substring (nth 2 other)
+                                       (max 0 (- (length (nth 2 other))
                                                  nl-agent-bulk-policy-rival-match-chars)))
-                            (concat (nth 1 mine) (nth 1 other)))
+                            (concat (nth 2 mine) (nth 2 other)))
                       found)))))))
     (nreverse found)))
 

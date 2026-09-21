@@ -388,6 +388,7 @@ is a false positive.
 | Plus separator stripping | 4 / 4 / 0 | 0 false | caught | 1 caught, 1 **missed** |
 | Plus a wider window and copula stripping | **4 / 4 / 0** | **0 false** | **caught** | **2 caught, 1 false** |
 | Plus the introducer rule | 4 / 4 / 0 | 0 false | caught | 2 caught, 1 false |
+| Plus the unit rule | 4 / 4 / 0 | 0 false | caught | 2 caught, 1 false |
 
 Recorded counts are fires / true / false over 86 worker answers; the corpora
 columns report false positives against their own correct answers.
@@ -2140,11 +2141,32 @@ four diagnostics including a fabricated reference to a path that does not
 exist. This is the first time on real material that the screens stopped an
 answer that was actually wrong.
 
-**And it produced a false positive.** On the 28.5 KB note the worker answered
-correctly and the rival screen rejected it anyway. That screen was calibrated
-to zero false positives across 42 synthetic cases; on the first set of real
-documents it fires wrongly on one of the three usable answers. Synthetic
-calibration did not transfer.
+**And it produced a false positive**, since fixed. On the 28.5 KB note the
+worker answered correctly and the rival screen rejected it anyway. The answer
+stated 1MΩ, an insulation resistance; the screen extracted the bare numeral `1`
+and, in 28.5 KB of real notes, found it beside a duration in one place and a
+different duration in another, both introduced by the same word. It called that
+a silently resolved disagreement.
+
+Bare digits are enough in a corpus with few numbers and not in a real document.
+The screen now compares **the numeral together with the unit that follows it**:
+`1MΩ` and `1時間` are different slots, `250kW` and `180kW` are the same one. The
+unit is a compact token taken from the characters immediately after the digits —
+Latin and SI symbols, short Japanese date, duration and count units — stopping
+before prose such as 程度 or です, compared after case folding, with a value
+that carries no unit treated as a different reading from one that does.
+
+Against the pre-change code, the nine genuine conflicts fire value for value
+and the real-document rejection is gone. The tenth case, `en-readings`, changes
+without loss: it was always a false-positive case on circuit labels, and the
+pair that disappeared — 85 MOhm against 8.5 Ω — is a unit mismatch the rule
+correctly suppresses.
+
+The correction that matters for method: **the calibration harness could not have
+shown this**, because it neutralises an earlier predicate rather than this one,
+so both of its arms already contained the new rule. The comparison above was
+made against a worktree at the pre-change commit. A harness written for one
+change does not measure the next one.
 
 **Latency rules out interactive use at these sizes.** The worker took 107 to
 891 seconds, the direct read 142 to 308. The worst case spent nearly fifteen

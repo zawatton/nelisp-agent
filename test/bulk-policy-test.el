@@ -1305,6 +1305,37 @@ neither side is introduced, so each direction needs its own case."
     "契約電力は250kWです"
     '((:path "a.txt" :text "契約電力は250kWです。\n契約電力は300kWです。\n")))))
 
+(ert-deftest nl-agent-bulk-policy-test-rival-different-units-are-different-slots ()
+  "The same digits with different units are not competing readings.
+This is the real defect shape: an answer's 1MΩ must not be paired with an
+unrelated 1時間 merely because both contexts end in 容量."
+  (should-not
+   (nl-agent-bulk-policy--unreported-rivals
+    "高抵抗 (1MΩ程度) で放電させる必要があります。"
+    '((:path "inspection.txt"
+       :text "不活性ガス消火設備 … 容量1時間\n屋内消火栓設備 … 容量30分間\n")))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-equal-units-remain-comparable ()
+  "Different numerals with the same unit remain rival readings."
+  (should
+   (nl-agent-bulk-policy--unreported-rivals
+    "契約電力は250kWです"
+    '((:path "a.txt" :text "契約電力は250kWです。\n契約電力は180kWです。\n")))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-tab-adjacent-unit-remains-comparable ()
+  "A tab-separated unit remains comparable with a prose-adjacent unit."
+  (should
+   (nl-agent-bulk-policy--unreported-rivals
+    "契約電力は250\tkWです"
+    '((:path "a.txt" :text "契約電力は250\tkWです。\n契約電力は180kWです。\n")))))
+
+(ert-deftest nl-agent-bulk-policy-test-rival-unit-and-no-unit-do-not-compare ()
+  "A unit-bearing value and a bare numeral do not provide a shared slot."
+  (should-not
+   (nl-agent-bulk-policy--unreported-rivals
+    "契約電力は250です"
+    '((:path "a.txt" :text "契約電力は250です。\n契約電力は180kWです。\n")))))
+
 (ert-deftest nl-agent-bulk-policy-test-rival-contradiction-survives-the-rule ()
   "The screen must still catch what it exists for."
   (let* ((sources '((:path "a.txt" :text "契約電力は250kWです。\n")
