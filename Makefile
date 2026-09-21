@@ -80,6 +80,7 @@ LISP = lisp/nl-agent-wire.el lisp/nl-agent-startup.el \
 LISP += examples/evaluate-bulk-reader.el
 LISP += examples/evaluate-bulk-policy.el
 
+.PHONY: drop-stale-elc
 .PHONY: test test-emacs test-nelisp test-stdio test-cli test-http test-ui test-task-eval \
 	test-cli-jsonl test-cli-jsonl-approval test-cli-jsonl-service \
 	test-task-promotion test-task-promotion-config test-task-promotion-service \
@@ -100,7 +101,24 @@ test-bulk-policy-eval:
 
 test: test-emacs test-nelisp test-stdio test-cli compile
 
-test-emacs:
+# A .elc whose source is newer silently supplies the old constants to any
+# `emacs --batch -l FILE' that does not set `load-prefer-newer' — which is every
+# hand-written probe, as opposed to the targets below, which do set it.  That is
+# a wrong answer, not a slow build: a measurement script here once read
+# min-source-bytes as 8192 instead of 3072 and split its results at the wrong
+# threshold.  Only stale files go; a .elc at least as new as its source is left
+# alone, and so is a .elc with no source beside it.
+drop-stale-elc:
+	@find . -type f -name '*.elc' 2>/dev/null \
+	  | while IFS= read -r compiled; do \
+	      source="$${compiled%c}"; \
+	      if [ -f "$$source" ] && [ "$$source" -nt "$$compiled" ]; then \
+	        rm -f "$$compiled" && echo "removed stale $$compiled"; \
+	      fi; \
+	    done; \
+	true
+
+test-emacs: drop-stale-elc
 	@set -eu; for test_file in $(EMACS_TESTS); do \
 		case "$$test_file" in training-worker-test.el|training-cancel-test.el) \
 			$(EMACS) -Q --batch --eval '(setq load-prefer-newer t)' \
@@ -173,8 +191,10 @@ test-semantic-render:
 test-semantic-eval:
 	@$(MAKE) test-emacs EMACS_TESTS='semantic-ir-test.el semantic-render-test.el semantic-repair-test.el semantic-faithfulness-test.el semantic-eval-test.el'
 
-# Compile in an owned temporary directory; never overwrite or sweep user .elc files.
-compile:
+# Compile in an owned temporary directory; never overwrite or sweep user .elc
+# files.  `drop-stale-elc' is the one exception and is not a sweep: it removes
+# only a .elc its own source has outlived.
+compile: drop-stale-elc
 	@set -eu; \
 	$(EMACS) -Q --batch -L lisp -L $(LLM_LISP) -L $(PHOTON_LISP) \
 		-l bytecomp \
