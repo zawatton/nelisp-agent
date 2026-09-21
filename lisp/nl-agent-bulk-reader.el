@@ -353,6 +353,16 @@ still fails, because an uncited answer is what this module exists to refuse."
           ;; Nothing downstream can see that, so the only place to stop it is
           ;; before the call.  Unset by default: the right value is the worker's
           ;; context, which this code cannot ask for.
+          ;;
+          ;; Necessary, not sufficient.  Measured on this host, Japanese
+          ;; records cost 0.27-0.29 tokens per byte for both workers tried,
+          ;; whether or not the reader's line numbering is included, so bytes
+          ;; do convert to tokens predictably.  What the budget cannot cover is
+          ;; the model's own output: a reasoning worker's generated thinking is
+          ;; counted into the prompt for the answering pass, and a 48 KB source
+          ;; measured at 13,859 input tokens was reported as a 17,685-token
+          ;; prompt when it truncated.  Leave headroom for that; how much is
+          ;; not knowable from the request.
           (when (and (nl-agent-bulk-reader-max-request-bytes reader)
                      (> request-bytes (nl-agent-bulk-reader-max-request-bytes reader)))
             (setq error-code 'request-too-large)

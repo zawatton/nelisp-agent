@@ -18,13 +18,17 @@ evaluation was measuring the regime where it cannot pay".
 
 **The window has an upper edge, set by the worker's context rather than by the
 arrangement.** At the host's default of 4096 tokens both workers failed every
-attempt at 24 KB and answered both ends of the file at 8.5 KB, giving a usable
-range of roughly 2 KB to 10 KB. Raising the server to 16384 answered 24 KB
-correctly at both ends. The request cannot set this; the host can. **Oversized
-prompts are truncated silently** — a server-side warning and a normal `200` —
-and a mildly truncated prompt still answers coherently, from an incomplete
-source, with a citation that verifies against the whole file. See "The upper
-edge".
+attempt at 24 KB, giving a usable range of roughly 2 KB to 10 KB. That is a
+default, not a limit: at 32768 the ladder runs to **48 KB answered correctly,
+with `r*` down to 1.06** and the main model reading 3% of a direct read, which
+is where the arrangement is worth most. The request cannot raise the context;
+the host can. **Oversized prompts are truncated silently** — a server-side
+warning and a normal `200` — and a mildly truncated prompt still answers
+coherently, from an incomplete source, with a citation that verifies against
+the whole file. `:max-request-bytes` refuses before the call, but a reasoning
+worker's own thinking counts into the same limit, so a budget on what is sent
+is necessary and not sufficient. See "The upper edge" and "The ladder past the
+default ceiling".
 
 **It does not reduce total work, and is not meant to.** Combined main-plus-
 worker input runs 1.30× a direct read on large sources and 3.44× on small
@@ -2012,6 +2016,64 @@ bytes and this code path cannot ask for it — the OpenAI-compatible endpoint
 exposes no such field. A host that knows its server should set it. Refusing
 costs a fallback; a silently truncated prompt costs a wrong answer that
 verifies.
+
+### The ladder past the default ceiling, 2026-09-21
+
+With the server raised to `OLLAMA_CONTEXT_LENGTH=32768`, the ladder extends to
+sizes no earlier run could read. Three new cases, same shape as the rest — one
+buried fact at two thirds depth, filler carrying no rival values —
+`llama3.2:3b` as the worker:
+
+| Source | `D` | `M` | `W` | `M/D` | `r*` | Correct | Elapsed |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
+| 16,068 B | 17,312 | 1,430 | 18,230 | 8% | 1.15 | yes | 95 s |
+| 32,022 B | 34,268 | 1,386 | 35,387 | 4% | 1.08 | yes | 116 s |
+| 48,079 B | 51,341 | 1,456 | 52,662 | 3% | **1.06** | yes | 399 s |
+
+**The asymptote holds.** `M` stays between 1,386 and 1,456 bytes across a
+three-fold growth in source, the same band it occupied at 8.5 KB, so the main
+model reads a fixed amount however large the file is. `r*` falls to 1.06,
+consistent with the 1.01 limit the fit predicted, and all three answers are
+correct. The argument that delegation is worth most on large sources was made
+from a fit over material no worker could read; it now rests on measurement.
+
+**The reference cap is what makes it hold.** The worker emitted 34 references
+at 16 KB, 15 at 32 KB and **101 at 48 KB**. Kept at two per path, `M` stays
+flat; without that limit it would grow with the worker's enthusiasm and the
+asymptote would not exist. A rule added to save bytes on a 9.9 KB case turns
+out to be what makes the large-source case work at all.
+
+**Latency goes the other way.** At 48 KB the model no longer fits in the
+graphics memory — `ollama ps` reports a 27%/73% CPU/GPU split — and the call
+takes 399 seconds against 95 at 16 KB. Bytes and wall clock part company
+exactly where the byte case gets strongest.
+
+### Bytes, tokens, and what the request budget cannot cover
+
+These runs were checked against the server log for truncation warnings and had
+none, and the check was then made directly: the 48 KB worker prompt measures
+**15,107 tokens against the 32,768 limit**, 17,661 to spare.
+
+Two guesses about token cost were made along the way and both were wrong, which
+is worth recording because both would have misled a host sizing a budget:
+
+| Guess | Measured |
+| --- | --- |
+| The reader's line numbering roughly doubles token cost | 0.287 tokens/byte numbered against 0.273 raw — the numbering is free |
+| The two workers' tokenizers differ by more than 2× | 24 KB file: `llama3.2:3b` 6,555 tokens, `qwen3:4b` 6,910 — 5% apart |
+
+So for this material bytes convert to tokens at a stable **0.27–0.29 per byte**
+regardless of worker or framing, and `:max-request-bytes` transfers between
+these workers rather than needing a value each.
+
+What the budget cannot cover is the model's own output. The truncation observed
+earlier reported a 17,685-token prompt against a 16,384 limit for a file whose
+input measures **13,859 tokens**; with the reader's framing that is about
+15,200, leaving roughly 2,500 tokens unaccounted for. `qwen3:4b` is a reasoning
+model, and this session established that its generated thinking is counted into
+the prompt for the answering pass. **A budget on what is sent is necessary and
+not sufficient**: it must leave headroom for what the model will generate
+before it answers, and how much that is cannot be known from the request.
 
 ### The repairs now appear in the canonical run
 
