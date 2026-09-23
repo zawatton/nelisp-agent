@@ -1,5 +1,8 @@
 ;;; training-runner-test.el --- real background runner smoke test -*- lexical-binding: t; -*-
 (require 'ert)
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-agent-training-runner)
 (require 'nl-llm-agent-evolve)
 (require 'nl-llm-agent-artifact)

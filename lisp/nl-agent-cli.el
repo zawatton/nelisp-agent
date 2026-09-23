@@ -6,6 +6,9 @@
 
 ;;; Code:
 
+(load (expand-file-name "nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'cl-lib)
 (require 'json)
 (require 'nl-agent-jsonl)
@@ -44,8 +47,6 @@
       (file-name-as-directory (expand-file-name "."))))
   "NeLisp Agent project root resolved from this module.")
 
-(add-to-list 'load-path
-             (expand-file-name "../nelisp-photon/lisp" nl-agent-cli-root))
 (require 'nl-llm-agent-artifact)
 
 (declare-function nl-agent-jsonl-approval-new "nl-agent-jsonl-approval"

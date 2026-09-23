@@ -2,6 +2,9 @@
 
 (require 'ert)
 (require 'cl-lib)
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-agent-training-recovery)
 (require 'nl-llm-agent-improve)
 (require 'nl-llm-agent-artifact)

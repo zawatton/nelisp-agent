@@ -1,6 +1,8 @@
 ;;; supervisor-test.el --- live NeLisp Agent host supervisor tests  -*- lexical-binding: t; -*-
 
-(add-to-list 'load-path (expand-file-name "lisp"))
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-agent-supervisor)
 (require 'nl-agent-host)
 (require 'nl-agent-mcp-stdio)

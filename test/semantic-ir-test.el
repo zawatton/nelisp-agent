@@ -1,6 +1,9 @@
 ;;; semantic-ir-test.el --- Semantic IR boundary tests -*- lexical-binding: t; -*-
 
 (require 'ert)
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-agent-semantic-ir)
 
 (defvar nl-agent-ir-test--executed nil)

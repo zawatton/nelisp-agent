@@ -5,6 +5,9 @@
 (require 'cl-lib)
 (require 'ert)
 (require 'json)
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-agent-semantic-eval)
 (require 'nl-agent-host)
 (require 'nl-llm-agent-provider)

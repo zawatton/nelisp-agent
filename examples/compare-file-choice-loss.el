@@ -42,6 +42,9 @@
         (nl-agent-supervised-file-diagnostic-auto-run nil))
     (load source nil nil t)))
 
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-llm-agent-action-grammar)
 (require 'nl-llm-agent-ondevice)
 (require 'nl-llm-agent-supervised)

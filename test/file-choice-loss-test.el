@@ -32,9 +32,9 @@
                   "nl-llm-agent-supervised" (records &optional tokenizer))
 
 (let ((here nl-agent-file-choice-loss-test--here))
-  (add-to-list 'load-path (expand-file-name "../lisp" here))
-  (add-to-list 'load-path (expand-file-name "../../nelisp-llm/lisp" here))
-  (add-to-list 'load-path (expand-file-name "../../nelisp-photon/lisp" here))
+  (load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                          (file-name-directory (or load-file-name buffer-file-name
+                                                   default-directory))) nil t)
   (load (expand-file-name "../examples/compare-file-choice-loss.el" here)
         nil nil t))
 

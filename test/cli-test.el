@@ -1,9 +1,8 @@
 ;;; cli-test.el --- NeLisp Agent command-line facade tests  -*- lexical-binding: t; -*-
 
-(add-to-list 'load-path (expand-file-name "lisp"))
-(add-to-list 'load-path
-             (or (getenv "NELISP_LLM_LISP")
-                 (expand-file-name "../nelisp-llm/lisp")))
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-agent-cli)
 
 (defvar nl-agent-cli-test--fail 0)

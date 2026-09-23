@@ -2,6 +2,9 @@
 
 ;;; Code:
 
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'cl-lib)
 (require 'ert)
 (require 'nl-llm-agent-provider)
@@ -11,9 +14,6 @@
   (file-name-directory (directory-file-name
                         (file-name-directory (or load-file-name buffer-file-name)))))
 
-(add-to-list 'load-path (expand-file-name "lisp" nl-agent-bulk-policy-eval-test--root))
-(add-to-list 'load-path (expand-file-name "../nelisp-llm/lisp" nl-agent-bulk-policy-eval-test--root))
-(add-to-list 'load-path (expand-file-name "../nelisp-photon/lisp" nl-agent-bulk-policy-eval-test--root))
 
 (load (expand-file-name "examples/evaluate-bulk-reader.el" nl-agent-bulk-policy-eval-test--root) nil t)
 (load (expand-file-name "examples/evaluate-bulk-policy.el" nl-agent-bulk-policy-eval-test--root) nil t)

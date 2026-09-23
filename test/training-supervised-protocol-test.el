@@ -7,9 +7,10 @@
   (file-name-directory (or load-file-name buffer-file-name)))
 
 (let ((here nl-agent-training-supervised-protocol-test--here))
-  (add-to-list 'load-path (expand-file-name "../lisp" here))
-  (add-to-list 'load-path (expand-file-name "../../nelisp-llm/lisp" here))
-  (add-to-list 'load-path (expand-file-name "../../nelisp-photon/lisp" here)))
+  (load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                          (file-name-directory (or load-file-name buffer-file-name
+                                                   default-directory))) nil t)
+)
 
 (require 'nl-agent-training-protocol)
 (require 'nl-llm-agent-artifact)

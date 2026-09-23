@@ -1,7 +1,8 @@
 ;;; service-tools-test.el --- host-authorized live service controls  -*- lexical-binding: t; -*-
 
-(add-to-list 'load-path (expand-file-name "lisp"))
-(add-to-list 'load-path (expand-file-name "../nelisp-llm/lisp"))
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-agent-service-tools)
 (require 'nl-agent-permission)
 (require 'nl-agent-supervisor)

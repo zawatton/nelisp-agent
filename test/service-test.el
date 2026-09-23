@@ -4,10 +4,9 @@
 ;; to nelisp-llm providers.  Keep these tests runnable by both Emacs and NeLisp.
 ;;   emacs -Q --batch -L lisp -L ../nelisp-llm/lisp -l test/service-test.el
 
-(add-to-list 'load-path (expand-file-name "lisp"))
-(add-to-list 'load-path
-             (or (getenv "NELISP_LLM_LISP")
-                 (expand-file-name "../nelisp-llm/lisp")))
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'cl-lib)
 (require 'nl-llm-agent-provider)
 (require 'nl-agent-service)

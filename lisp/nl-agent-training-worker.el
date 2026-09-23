@@ -1,9 +1,9 @@
 ;;; nl-agent-training-worker.el --- one-shot isolated trainer -*- lexical-binding: t; -*-
 
 ;;; Code:
-(let ((here (file-name-directory (or load-file-name buffer-file-name))))
-  (dolist (dir (list here (expand-file-name "../../nelisp-llm/lisp" here)))
-    (when (file-directory-p dir) (add-to-list 'load-path dir))))
+(load (expand-file-name "nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'cl-lib)
 (require 'nl-agent-training-protocol)
 (require 'nl-llm-agent-improve)

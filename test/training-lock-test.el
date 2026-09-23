@@ -1,9 +1,9 @@
 ;;; training-lock-test.el --- background training ownership tests -*- lexical-binding: t; -*-
 
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'ert)
-(add-to-list 'load-path (expand-file-name "../lisp"))
-(add-to-list 'load-path (expand-file-name "../../nelisp-llm/lisp"))
-(add-to-list 'load-path (expand-file-name "../../nelisp-photon/lisp"))
 (require 'nl-agent-training-runner)
 
 (defun training-lock--queue (file)

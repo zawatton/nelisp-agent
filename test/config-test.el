@@ -1,9 +1,8 @@
 ;;; config-test.el --- declarative NeLisp Agent configuration tests  -*- lexical-binding: t; -*-
 
-(add-to-list 'load-path (expand-file-name "lisp"))
-(add-to-list 'load-path
-             (or (getenv "NELISP_LLM_LISP")
-                 (expand-file-name "../nelisp-llm/lisp")))
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-agent-config)
 
 (defvar nl-agent-config-test--fail 0)

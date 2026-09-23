@@ -1,6 +1,9 @@
 ;;; training-worker-test.el --- protocol and worker smoke tests -*- lexical-binding: t; -*-
 (require 'ert)
 (require 'cl-lib)
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-agent-training-protocol)
 (require 'nl-agent-training-worker)
 (require 'nl-llm-agent-improve)

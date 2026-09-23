@@ -1,5 +1,8 @@
 ;;; bulk-eval-test.el --- fixed bulk-reader evaluation tests -*- lexical-binding: t; -*-
 
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'ert)
 (require 'cl-lib)
 (require 'nl-llm-agent-provider)
@@ -7,9 +10,6 @@
 (defconst nl-agent-bulk-eval-test--root
   (file-name-directory (directory-file-name
                         (file-name-directory (or load-file-name buffer-file-name)))))
-(add-to-list 'load-path (expand-file-name "lisp" nl-agent-bulk-eval-test--root))
-(add-to-list 'load-path (expand-file-name "../nelisp-llm/lisp" nl-agent-bulk-eval-test--root))
-(add-to-list 'load-path (expand-file-name "../nelisp-photon/lisp" nl-agent-bulk-eval-test--root))
 (load (expand-file-name "examples/evaluate-bulk-reader.el" nl-agent-bulk-eval-test--root) nil t)
 (declare-function nl-agent-example-bulk-eval-load-corpus "evaluate-bulk-reader.el")
 (declare-function nl-agent-example-bulk-eval-run "evaluate-bulk-reader.el")

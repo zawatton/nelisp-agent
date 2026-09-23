@@ -25,7 +25,10 @@
           (or load-file-name buffer-file-name
               (and (boundp 'byte-compile-current-file)
                    (symbol-value 'byte-compile-current-file))))))
-    (add-to-list 'load-path (expand-file-name "../lisp" source-directory))))
+    (load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                            (file-name-directory (or load-file-name buffer-file-name
+                                                     default-directory))) nil t)
+))
 
 (require 'nl-agent-wire)
 

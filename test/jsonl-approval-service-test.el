@@ -1,9 +1,10 @@
 ;;; jsonl-approval-service-test.el --- packaged JSONL approval service -*- lexical-binding: t; -*-
 
 (let ((here (file-name-directory (or load-file-name buffer-file-name))))
-  (add-to-list 'load-path (expand-file-name "../lisp" here))
-  (add-to-list 'load-path (expand-file-name "../../nelisp-llm/lisp" here))
-  (add-to-list 'load-path (expand-file-name "../../nelisp-photon/lisp" here)))
+  (load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                          (file-name-directory (or load-file-name buffer-file-name
+                                                   default-directory))) nil t)
+)
 
 (require 'cl-lib)
 (require 'ert)

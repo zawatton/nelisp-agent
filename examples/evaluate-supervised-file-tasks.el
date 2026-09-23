@@ -11,9 +11,10 @@
 (let* ((here (file-name-directory (or load-file-name buffer-file-name)))
        (agent-root (expand-file-name ".." here))
        (notes-dev (expand-file-name ".." agent-root)))
-  (add-to-list 'load-path (expand-file-name "lisp" agent-root))
-  (add-to-list 'load-path (expand-file-name "nelisp-llm/lisp" notes-dev))
-  (add-to-list 'load-path (expand-file-name "nelisp-photon/lisp" notes-dev)))
+  (load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                          (file-name-directory (or load-file-name buffer-file-name
+                                                   default-directory))) nil t)
+)
 
 (require 'cl-lib)
 (require 'nl-llm-agent-action-grammar)

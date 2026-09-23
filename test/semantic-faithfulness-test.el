@@ -1,6 +1,9 @@
 ;;; semantic-faithfulness-test.el --- narrow source-number screen tests -*- lexical-binding: t; -*-
 
 (require 'ert)
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-agent-semantic-render)
 
 (defvar nl-agent-semantic-faithfulness-test--queue nil)

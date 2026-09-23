@@ -15,9 +15,9 @@
                   (prompt-ids completion step-fn grammar))
 
 (let ((here nl-agent-file-teacher-forcing-test--here))
-  (add-to-list 'load-path (expand-file-name "../lisp" here))
-  (add-to-list 'load-path (expand-file-name "../../nelisp-llm/lisp" here))
-  (add-to-list 'load-path (expand-file-name "../../nelisp-photon/lisp" here))
+  (load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                          (file-name-directory (or load-file-name buffer-file-name
+                                                   default-directory))) nil t)
   (load (expand-file-name
          "../examples/diagnose-file-teacher-forcing.el" here)
         nil nil t))

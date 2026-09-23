@@ -3,6 +3,9 @@
 ;; Availability is provider-controlled and can change.  Pass the provider's
 ;; current OpenAI-compatible base URL instead of embedding a machine endpoint.
 
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-agent-config)
 
 (defconst nl-agent-example-free-models

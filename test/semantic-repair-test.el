@@ -1,6 +1,9 @@
 ;;; semantic-repair-test.el --- bounded semantic renderer repair tests -*- lexical-binding: t; -*-
 
 (require 'ert)
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'nl-agent-semantic-render)
 
 (defconst nl-agent-semantic-repair-test--ir
