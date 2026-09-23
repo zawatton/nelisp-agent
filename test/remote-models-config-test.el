@@ -19,6 +19,7 @@
 (let ((directory (file-name-directory (or load-file-name buffer-file-name
                                           default-directory)))
       (old-models (getenv "NELISP_AGENT_REMOTE_MODELS"))
+      (old-timeout (getenv "NELISP_AGENT_REMOTE_TIMEOUT_SEC"))
       models)
   (unwind-protect
       (progn
@@ -53,8 +54,16 @@
         (nl-agent-remote-models-config-test--ck
          "configured environment uses remaining models as fallbacks"
          (equal (nl-agent-example-remote-fallback-models)
-                '("remote/c/d:free"))))
-    (setenv "NELISP_AGENT_REMOTE_MODELS" old-models)))
+                '("remote/c/d:free")))
+
+        (dolist (case '((nil . nil) ("180" . 180) (" 90 " . 90)
+                        ("0" . nil) ("abc" . nil)))
+          (setenv "NELISP_AGENT_REMOTE_TIMEOUT_SEC" (car case))
+          (nl-agent-remote-models-config-test--ck
+           (format "timeout environment %S reads as %S" (car case) (cdr case))
+           (equal (nl-agent-example-remote-timeout-sec) (cdr case)))))
+    (setenv "NELISP_AGENT_REMOTE_MODELS" old-models)
+    (setenv "NELISP_AGENT_REMOTE_TIMEOUT_SEC" old-timeout)))
 
 (princ (format "NL-AGENT-REMOTE-MODELS %s (%d failures)\n"
                (if (= nl-agent-remote-models-config-test--fail 0)

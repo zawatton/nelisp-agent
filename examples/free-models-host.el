@@ -18,6 +18,7 @@
 (declare-function nl-agent-example-remote-models "free-models-config" ())
 (declare-function nl-agent-example-remote-default-model "free-models-config" ())
 (declare-function nl-agent-example-remote-fallback-models "free-models-config" ())
+(declare-function nl-agent-example-remote-timeout-sec "free-models-config" ())
 (load (expand-file-name "examples/free-models-config.el"
                         nl-agent-example-host-root))
 (require 'nl-agent-host)
@@ -94,11 +95,16 @@ is host-selected and defaults to legacy `trajectory-finetune'; selecting
                      (list :id "remote"
                            :type 'openai
                            :base-url base-url
-                           :models (nl-agent-example-remote-models))))
+                           :models (nl-agent-example-remote-models)))
+                    (timeout (nl-agent-example-remote-timeout-sec)))
                 (when api-key-environment
                   (setq provider
                         (append provider
                                 (list :api-key-env api-key-environment))))
+                (when timeout
+                  (setq provider
+                        (append provider
+                                (list :timeout-sec timeout))))
                 (setq providers (cons provider providers))))
             (unless providers
               (error "configure --base-url, --native-catalog, --improvement-config, or --recurrent-config"))

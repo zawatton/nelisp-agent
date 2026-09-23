@@ -337,8 +337,9 @@ A model invokes a published tool with non-evaluated Lisp data:
 provider and the anvil MCP toolsets.  It reads =OPENROUTER_API_KEY= from the
 environment, or from =NELISP_AGENT_ENV_FILE= when that file is readable; the
 default file is =~/.hermes/.env=.  It uses =NELISP_AGENT_REMOTE_MODELS= for the
-remote model list, defaulting to =qwen/qwen3.8-27b:free=, and publishes the
-same anvil tools Hermes allowlists through
+remote model list, defaulting to =qwen/qwen3.8-27b:free=, and
+=NELISP_AGENT_REMOTE_TIMEOUT_SEC= (launcher default 180) sets the per-request
+model timeout; it publishes the same anvil tools Hermes allowlists through
 =examples/anvil-mcp-config.json=.  With =--unattended=, =--read-only-shell=
 (or =NELISP_AGENT_READ_ONLY_SHELL=1=, the launcher default) grants only
 read-only shell commands; redirections, command substitution, paths outside the

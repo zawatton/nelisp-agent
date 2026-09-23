@@ -56,6 +56,14 @@ list of provider model IDs.  Otherwise return the hard-coded example catalog."
                 (concat "remote/" (plist-get model :id)))
               (cdr models)))))
 
+(defun nl-agent-example-remote-timeout-sec ()
+  "Return NELISP_AGENT_REMOTE_TIMEOUT_SEC as a positive number, or nil."
+  (let ((configured (getenv "NELISP_AGENT_REMOTE_TIMEOUT_SEC")))
+    (when (and configured (not (string-blank-p configured)))
+      (let ((value (string-to-number (string-trim configured))))
+        (when (and (numberp value) (> value 0))
+          value)))))
+
 (defun nl-agent-example-free-service (base-url &optional api-key-environment)
   "Open the example service at OpenAI-compatible BASE-URL.
 When API-KEY-ENVIRONMENT is non-nil, its value is resolved for every request."
@@ -63,10 +71,14 @@ When API-KEY-ENVIRONMENT is non-nil, its value is resolved for every request."
          (list :id "remote"
                :type 'openai
                :base-url base-url
-               :models (nl-agent-example-remote-models))))
+               :models (nl-agent-example-remote-models)))
+        (timeout (nl-agent-example-remote-timeout-sec)))
     (when api-key-environment
       (setq provider
             (append provider (list :api-key-env api-key-environment))))
+    (when timeout
+      (setq provider
+            (append provider (list :timeout-sec timeout))))
     (nl-agent-config-open
      (list :default-model (nl-agent-example-remote-default-model)
            :fallback-models (nl-agent-example-remote-fallback-models)
