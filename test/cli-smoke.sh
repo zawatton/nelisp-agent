@@ -6,7 +6,7 @@ project_root=$(dirname -- "$test_dir")
 output=$(sh "$project_root/bin/nelisp-agent" --help)
 
 case "$output" in
-  *"Usage: nelisp-agent"*"--improvement-config FILE"*"--autonomous-improvement"*"--unattended"*"/model SELECTOR"*)
+  *"Usage: kaji"*"--improvement-config FILE"*"--autonomous-improvement"*"--unattended"*"/model SELECTOR"*)
     printf '%s\n' "NL-AGENT-CLI-SMOKE PASS"
     ;;
   *)

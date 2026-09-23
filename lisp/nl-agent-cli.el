@@ -39,6 +39,9 @@
 (declare-function nl-agent-trajectory-save
                   "nl-agent-trajectory" (directory task response))
 
+(declare-function nl-agent-local-read-only-shell-approval
+                  "nl-agent-local-tools" (request))
+
 (defconst nl-agent-cli-root
   (let ((source (or load-file-name buffer-file-name)))
     (if source
@@ -65,9 +68,9 @@
   "JSONL session input/output failure")
 
 (defconst nl-agent-cli-help
-  "Usage: nelisp-agent [OPTIONS]
+  "Usage: kaji [OPTIONS]
 
-Start an interactive NeLisp Agent session.  Plain input runs an agent task.
+Start an interactive Kaji session.  Plain input runs an agent task.
 
 Options:
   --base-url URL       OpenAI-compatible provider endpoint (or environment)
@@ -93,6 +96,7 @@ Options:
   --jsonl               Run one persistent JSONL request/response session
   --jsonl-approval      Ask for tool approval through the JSONL stream
   --unattended         Never prompt; deny unscoped tools requiring approval
+  --read-only-shell    With --unattended, allow read-only shell commands (rg, sed -n, git log, ...)
   --help               Show this help
   --version            Show the development version
 
@@ -108,6 +112,7 @@ Environment:
   NELISP_AGENT_RECURRENT_CONFIG
   NELISP_AGENT_MODEL
   NELISP_AGENT_TRAJECTORY_DIRECTORY
+  NELISP_AGENT_READ_ONLY_SHELL
 
 Interactive commands:
   /models              List available models
@@ -174,6 +179,8 @@ Interactive commands:
             (setq tail (cdr tail))))
          ((equal option "--unattended")
           (setq options (plist-put options :unattended t)))
+         ((equal option "--read-only-shell")
+          (setq options (plist-put options :read-only-shell t)))
          ((equal option "--jsonl")
           (when (plist-member options :jsonl)
             (error "duplicate option: %s" option))
@@ -205,6 +212,9 @@ Interactive commands:
         (error "--jsonl-approval requires --jsonl"))
       (when (plist-get options :unattended)
         (error "--jsonl-approval cannot be combined with --unattended")))
+    (when (and (plist-get options :read-only-shell)
+               (not (plist-get options :unattended)))
+      (error "--read-only-shell requires --unattended"))
     options))
 
 (defun nl-agent-cli-options-with-environment (options)
@@ -228,6 +238,9 @@ Interactive commands:
           (when (and value (not (string-empty-p value)))
             (setq result
                   (append result (list (car pair) value)))))))
+    (when (and (equal (getenv "NELISP_AGENT_READ_ONLY_SHELL") "1")
+               (not (plist-member result :read-only-shell)))
+      (setq result (plist-put result :read-only-shell t)))
     result))
 
 (defun nl-agent-cli--read-line (prompt)
@@ -397,7 +410,7 @@ Capture failures annotate the original response without retrying the request."
 	    (format "Checkpoint captured (%s messages)."
 		    (length
 		     (plist-get (plist-get response :checkpoint) :messages))))
-	   ((eq kind 'closed) "NeLisp Agent stopped.")
+	   ((eq kind 'closed) "Kaji stopped.")
 	   (t (format "%S" response)))))
     (if warning
       (concat text "\nWARNING: trajectory capture failed: " warning)
@@ -480,7 +493,7 @@ module's correlated call boundary."
         (write-function (or write-function #'nl-agent-cli--write-line))
         (running t))
     (funcall write-function
-             (format "NeLisp Agent %s — /help for commands"
+             (format "Kaji %s — /help for commands"
                      nl-agent-cli-version))
     (while running
       (let ((line (funcall read-function "nelisp> ")))
@@ -595,7 +608,7 @@ module's correlated call boundary."
     0)
    ((plist-get options :version)
     (nl-agent-cli--write-line
-     (format "NeLisp Agent %s" nl-agent-cli-version))
+     (format "Kaji %s" nl-agent-cli-version))
     0)
    (t
     (let* ((options (nl-agent-cli-options-with-environment options))
@@ -614,6 +627,10 @@ module's correlated call boundary."
               (lambda (request)
                 (nl-agent-jsonl-approval-callback
                  approval-state request)))
+             ((and (plist-get options :unattended)
+                   (plist-get options :read-only-shell))
+              (require 'nl-agent-local-tools)
+              #'nl-agent-local-read-only-shell-approval)
              ((or (plist-get options :unattended)
                   (plist-get options :jsonl))
               nil)

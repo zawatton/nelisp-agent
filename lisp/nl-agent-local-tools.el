@@ -41,6 +41,163 @@
     "\\_<rm\\_>.*-[^ \t\n]*f[^ \t\n]*r[^ \t\n]*[ \t]+/\\(?:[ \t]\\|$\\)")
   "Shell patterns blocked even when an approval callback grants a request.")
 
+(defconst nl-agent-local-read-only-programs
+  '("rg" "grep" "cat" "head" "tail" "wc" "ls" "find" "sed" "git"
+    "nl" "cut" "tr" "pwd")
+  "Programs an unattended read-only shell command may run.")
+
+(defun nl-agent-local--dot-component-p (command index)
+  "Return non-nil when the path component at INDEX in COMMAND starts with `.'.
+The component starts after the nearest preceding space, tab, `/' or `|'."
+  (let ((start index))
+    (while (and (> start 0)
+                (not (memq (aref command (1- start)) '(?\s ?\t ?/ ?|))))
+      (setq start (1- start)))
+    (eq (aref command start) ?.)))
+
+(defun nl-agent-local--read-only-segments (command)
+  "Return COMMAND as a list of pipeline segments, each an argv list.
+
+Quotes are removed exactly as sh would for the accepted subset, so the
+argv checked is the argv executed.  Return nil when COMMAND contains shell
+syntax this conservative read-only policy does not recognize, contains a
+newline or carriage return, has unbalanced quotes, or has an empty segment."
+  (let ((length (length command))
+        (index 0)
+        (state nil)
+        (token nil)
+        (token-started nil)
+        (argv nil)
+        (segments nil))
+    (cl-flet ((finish-token ()
+                (when token-started
+                  (push (apply #'string (nreverse token)) argv))
+                (setq token nil token-started nil))
+              (finish-segment ()
+                (unless argv (throw 'reject nil))
+                (push (nreverse argv) segments)
+                (setq argv nil)))
+      (catch 'reject
+        (while (< index length)
+          (let ((character (aref command index)))
+            (cond
+             ((memq character '(?\n ?\r)) (throw 'reject nil))
+             ((eq state ?')
+              (if (eq character ?')
+                  (setq state nil)
+                (push character token)))
+             ((eq state ?\")
+              (cond
+               ((memq character '(?$ ?` ?\\)) (throw 'reject nil))
+               ((eq character ?\") (setq state nil))
+               (t (push character token))))
+             ((memq character '(?\; ?& ?< ?> ?\( ?\) ?\{ ?\} ?$ ?` ?\\ ?? ?\[))
+              ;; `?' and `[' are rejected unquoted because a glob such as
+              ;; `?./x' or `[.][.]/x' expands to a parent-directory path
+              ;; after this check has run.
+              (throw 'reject nil))
+             ((and (eq character ?*)
+                   (nl-agent-local--dot-component-p command index))
+              ;; `.*' can expand to `..'; a `*' elsewhere never matches a
+              ;; leading dot in POSIX sh.
+              (throw 'reject nil))
+             ((memq character '(?\s ?\t)) (finish-token))
+             ((eq character ?|) (finish-token) (finish-segment))
+             ((eq character ?') (setq state ?' token-started t))
+             ((eq character ?\") (setq state ?\" token-started t))
+             (t (push character token) (setq token-started t))))
+          (setq index (1+ index)))
+        (when state (throw 'reject nil))
+        (finish-token)
+        (finish-segment)
+        (nreverse segments)))))
+
+(defun nl-agent-local--read-only-argv-p (argv)
+  "Return non-nil when shell ARGV names a conservative read-only command."
+  (let ((program (car argv))
+        (arguments (cdr argv)))
+    (and (member program nl-agent-local-read-only-programs)
+         (not (cl-find-if
+               (lambda (argument)
+                 (or (string-prefix-p "/" argument)
+                     (string-prefix-p "~" argument)
+                     (equal argument "..")
+                     (string-prefix-p "../" argument)
+                     (string-match-p "/\\.\\./" argument)
+                     (string-suffix-p "/.." argument)))
+               arguments))
+         (pcase program
+           ("rg"
+            (not (cl-find-if
+                  (lambda (argument)
+                    (or (string-prefix-p "--pre" argument)
+                        (member argument '("-z" "--search-zip"))
+                        (string-prefix-p "--hostname-bin" argument)))
+                  arguments)))
+           ("find"
+            (not (cl-intersection
+                  '("-exec" "-execdir" "-ok" "-okdir" "-delete"
+                    "-fprint" "-fprint0" "-fprintf" "-fls")
+                  arguments :test #'equal)))
+           ("sed"
+            ;; Only `-n' and a line-range print script, then file operands:
+            ;; this excludes -i, w/W (write) and e (execute) scripts.
+            (let ((options
+                   (cl-remove-if-not
+                    (lambda (argument) (string-prefix-p "-" argument))
+                    arguments))
+                  (operands
+                   (cl-remove-if
+                    (lambda (argument) (string-prefix-p "-" argument))
+                    arguments)))
+              (and (member "-n" options)
+                   (cl-every (lambda (option) (equal option "-n")) options)
+                   operands
+                   (string-match-p
+                    "\\`\\(?:[0-9]+\\|\\$\\)\\(?:,\\(?:[0-9]+\\|\\$\\)\\)?p\\'"
+                    (car operands)))))
+           ("tail"
+            (not (cl-find-if
+                  (lambda (argument)
+                    (or (member argument '("-f" "-F"))
+                        (string-prefix-p "--follow" argument)))
+                  arguments)))
+           ("git"
+            (let ((subcommand (cadr argv)))
+              (and (member subcommand
+                           '("status" "log" "show" "diff" "grep"
+                             "ls-files" "blame" "rev-parse"))
+                   (not (cl-find-if
+                         (lambda (argument)
+                           (or (string-prefix-p "--output" argument)
+                               (string-prefix-p "--ext-diff" argument)
+                               (string-prefix-p "--textconv" argument)
+                               (string-prefix-p "--open-files-in-pager"
+                                                argument)
+                               (equal argument "-O")))
+                         arguments)))))
+           (_ t)))))
+
+(defun nl-agent-local-read-only-command-p (command)
+  "Return non-nil when shell COMMAND only performs conservative reads.
+
+The command may contain pipelines, but each segment must name an
+allowlisted program and satisfy that program's read-only argument rules.
+Anything outside the recognized shell subset is a rejection."
+  (and
+   (stringp command)
+   (let ((segments (nl-agent-local--read-only-segments command)))
+     (and segments
+          (cl-every #'nl-agent-local--read-only-argv-p segments)))))
+
+(defun nl-agent-local-read-only-shell-approval (request)
+  "Allow a `shell' REQUEST once when its command is read-only."
+  (if (and (equal (plist-get request :tool) "shell")
+           (nl-agent-local-read-only-command-p
+            (plist-get (plist-get request :args) :command)))
+      'once
+    'deny))
+
 (defun nl-agent-local--root (root where)
   "Return existing directory ROOT as a canonical directory for WHERE."
   (unless (and (stringp root) (file-directory-p root))

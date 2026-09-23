@@ -39,6 +39,22 @@
             (mapcar (lambda (item) (plist-get item :name))
                     (nl-agent-tool-catalog registry))
             '("mcp.fixture.echo" "mcp.fixture.environment_probe")))
+          (let ((included-client
+                 (nl-agent-mcp-stdio-client-new
+                  "included"
+                  (list emacs-binary "-Q" "--batch" "-l" fixture)
+                  :directory project-directory :timeout-sec 3
+                  :include-tools '("echo"))))
+            (unwind-protect
+                (let ((registry (nl-agent-tool-registry-new)))
+                  (nl-agent-mcp-register-tools registry included-client :risk 'read)
+                  (nl-agent-mcp-stdio-test--ck
+                   "include-tools restricts the registered MCP catalog"
+                   (equal
+                    (mapcar (lambda (item) (plist-get item :name))
+                            (nl-agent-tool-catalog registry))
+                    '("mcp.included.echo"))))
+              (nl-agent-mcp-client-close included-client)))
           (let ((result
                  (nl-agent-permission-call
                   (nl-agent-permission-policy-new :mode 'smart)

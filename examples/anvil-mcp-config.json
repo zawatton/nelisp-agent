@@ -1,0 +1,43 @@
+{
+  "servers": [
+    {
+      "id": "anvil",
+      "command": [
+        "bash",
+        "-c",
+        "exec bash \"${ANVIL_EL_DIR:-$HOME/.emacs.d/external-packages/anvil.el}/tools/anvil-standalone-mcp.sh\""
+      ],
+      "environment": {
+        "HOME": "HOME"
+      },
+      "risk": "read",
+      "timeoutSec": 120,
+      "era": "auto",
+      "probeTimeoutSec": 120,
+      "tools": [
+        "code-context",
+        "code-context-batch",
+        "code-context-dependencies",
+        "defs-index"
+      ]
+    },
+    {
+      "id": "anvil-host-index",
+      "command": [
+        "bash",
+        "-c",
+        "exec bash \"${ANVIL_EL_DIR:-$HOME/.emacs.d/external-packages/anvil.el}/anvil-stdio.sh\" --socket=\"${ANVIL_EMACS_SOCKET:-$HOME/.cache/tmp/emacs$(id -u)/codex-anvil}\" --server-id=emacs-eval"
+      ],
+      "environment": {
+        "HOME": "HOME"
+      },
+      "risk": "read",
+      "timeoutSec": 60,
+      "era": "auto",
+      "tools": [
+        "code-context-project",
+        "defs-index-update"
+      ]
+    }
+  ]
+}

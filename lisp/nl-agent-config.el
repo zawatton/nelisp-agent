@@ -49,13 +49,13 @@
   (nl-agent-config--keys
    spec
    '(:id :type :name :base-url :models :api-key :api-key-env
-     :headers :transport :chat-path)
+     :headers :transport :chat-path :timeout-sec)
    "OpenAI provider config")
   (let ((args
          (list :base-url (plist-get spec :base-url)
                :models (plist-get spec :models)
                :api-key (nl-agent-config--api-key spec))))
-    (dolist (key '(:name :headers :transport :chat-path))
+    (dolist (key '(:name :headers :transport :chat-path :timeout-sec))
       (when (plist-member spec key)
         (setq args (append args (list key (plist-get spec key))))))
     (apply #'nl-llm-agent-openai-provider

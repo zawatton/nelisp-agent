@@ -40,7 +40,7 @@ Protocol and mode flags are supplied by the UI and cannot be overridden here."
   "Maximum retained transcript size when no approval block is active.")
 
 (defconst nl-agent-ui--forbidden-arguments
-  '("--task" "--chat" "--help" "--version" "--unattended"
+  '("--task" "--chat" "--help" "--version" "--unattended" "--read-only-shell"
     "--jsonl" "--jsonl-approval" "--workspace" "--"))
 
 (defun nl-agent-ui--argument-forbidden-p (argument)
@@ -49,8 +49,8 @@ Protocol and mode flags are supplied by the UI and cannot be overridden here."
       (cl-some (lambda (prefix)
                  (string-prefix-p (concat prefix "=") argument))
                  '("--task" "--chat" "--help" "--version"
-                 "--unattended" "--jsonl" "--jsonl-approval"
-                 "--workspace"))))
+                 "--unattended" "--read-only-shell" "--jsonl"
+                 "--jsonl-approval" "--workspace"))))
 
 (defun nl-agent-ui--validate-argv (argv where)
   "Validate string ARGV for WHERE and return a detached copy."
@@ -320,13 +320,13 @@ started with JSONL and approval protocol flags; no network client is loaded."
    (list (read-directory-name "Agent workspace: " default-directory nil t)))
   (let* ((workspace (file-name-as-directory
                      (expand-file-name (or workspace default-directory))))
-         (buffer (generate-new-buffer "*NeLisp Agent*"))
+         (buffer (generate-new-buffer "*Kaji*"))
          (client nil))
     (with-current-buffer buffer
       (nl-agent-ui-mode)
       (setq-local nl-agent-ui--workspace workspace)
       (add-hook 'kill-buffer-hook #'nl-agent-ui--kill-buffer nil t)
-      (nl-agent-ui--insert "NeLisp Agent workspace: %s\n" workspace)
+      (nl-agent-ui--insert "Kaji workspace: %s\n" workspace)
       (condition-case err
           (setq client
                 (nl-agent-client-open

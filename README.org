@@ -1,4 +1,11 @@
-#+TITLE: NeLisp Agent
+#+TITLE: Kaji (鍛冶)
+
+Kaji was previously called NeLisp Agent.  The name is Japanese for a
+blacksmith: the agent that works at the anvil, whose MCP tools it uses.
+Internal Lisp symbols keep the =nl-agent-= prefix and environment variables
+keep the =NELISP_AGENT_= prefix.  =bin/nelisp-agent= remains the core
+command line; =bin/kaji= is the OpenRouter + anvil launcher
+(=bin/nelisp-agent-openrouter= is kept as a compatibility name).
 
 * Purpose
 
@@ -118,8 +125,8 @@ authority.
 - The modern MCP stdio client implements the stateless 2026-07-28 protocol,
   including per-request metadata, paginated =tools/list=, =tools/call=, bounded
   frames/schemas, subprocess timeout, restricted environment inheritance, and
-  argument-free audit records.  Initialize-era MCP revisions are not yet
-  supported.
+  argument-free audit records.  Initialize-era servers are reached through a
+  =server/discover= probe and legacy handshake fallback.
 - The standard host tools provide workspace-confined exact edits, approved
   shell commands, and isolated batch-process Elisp.  Obvious destructive shell
   operations and dangerous Elisp primitives are blocked before execution.
@@ -317,6 +324,12 @@ path, locale, temporary-directory, and Windows process variables.  Relative
 directories resolve from the configuration file.  Optional limits are
 =timeoutSec= and =maxFrameBytes=.
 
+Servers from both MCP eras are supported.  The =era= key defaults to =auto=,
+which probes with =server/discover= and falls back to the =initialize=
+handshake for initialize-era servers (2025-11-25 and earlier).  Set =era= to
+=modern= or =legacy= to skip the probe.  The =legacyProtocolVersion= key
+(default 2025-11-25) and =probeTimeoutSec= key tune the fallback.
+
 A model invokes a published tool with non-evaluated Lisp data:
 
 #+begin_example
@@ -324,6 +337,24 @@ A model invokes a published tool with non-evaluated Lisp data:
 (:name "mcp.notes.search" :arguments (:query "transformer oil"))
 ```
 #+end_example
+
+*** Replacing a Hermes Agent setup
+
+=bin/kaji= is a drop-in launcher for the OpenRouter
+provider and the anvil MCP toolsets.  It reads =OPENROUTER_API_KEY= from the
+environment, or from =NELISP_AGENT_ENV_FILE= when that file is readable; the
+default file is =~/.hermes/.env=.  It uses =NELISP_AGENT_REMOTE_MODELS= for the
+remote model list, defaulting to =qwen/qwen3.8-27b:free=, and
+=NELISP_AGENT_REMOTE_TIMEOUT_SEC= (launcher default 180) sets the per-request
+model timeout; it publishes the same anvil tools Hermes allowlists through
+=examples/anvil-mcp-config.json=.  With =--unattended=, =--read-only-shell=
+(or =NELISP_AGENT_READ_ONLY_SHELL=1=, the launcher default) grants only
+read-only shell commands; redirections, command substitution, paths outside the
+workspace, and write-capable options are denied; edit and elisp stay denied.
+
+#+begin_src sh
+bin/kaji --workspace ../nelisp --unattended --task "..."
+#+end_src
 
 * Service API
 

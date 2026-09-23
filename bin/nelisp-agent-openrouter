@@ -1,0 +1,3 @@
+#!/bin/sh
+# Compatibility name; the launcher is now bin/kaji.
+exec "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/kaji" "$@"
