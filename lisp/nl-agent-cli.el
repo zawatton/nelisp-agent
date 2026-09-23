@@ -68,9 +68,9 @@
   "JSONL session input/output failure")
 
 (defconst nl-agent-cli-help
-  "Usage: nelisp-agent [OPTIONS]
+  "Usage: kaji [OPTIONS]
 
-Start an interactive NeLisp Agent session.  Plain input runs an agent task.
+Start an interactive Kaji session.  Plain input runs an agent task.
 
 Options:
   --base-url URL       OpenAI-compatible provider endpoint (or environment)
@@ -410,7 +410,7 @@ Capture failures annotate the original response without retrying the request."
 	    (format "Checkpoint captured (%s messages)."
 		    (length
 		     (plist-get (plist-get response :checkpoint) :messages))))
-	   ((eq kind 'closed) "NeLisp Agent stopped.")
+	   ((eq kind 'closed) "Kaji stopped.")
 	   (t (format "%S" response)))))
     (if warning
       (concat text "\nWARNING: trajectory capture failed: " warning)
@@ -493,7 +493,7 @@ module's correlated call boundary."
         (write-function (or write-function #'nl-agent-cli--write-line))
         (running t))
     (funcall write-function
-             (format "NeLisp Agent %s — /help for commands"
+             (format "Kaji %s — /help for commands"
                      nl-agent-cli-version))
     (while running
       (let ((line (funcall read-function "nelisp> ")))
@@ -608,7 +608,7 @@ module's correlated call boundary."
     0)
    ((plist-get options :version)
     (nl-agent-cli--write-line
-     (format "NeLisp Agent %s" nl-agent-cli-version))
+     (format "Kaji %s" nl-agent-cli-version))
     0)
    (t
     (let* ((options (nl-agent-cli-options-with-environment options))

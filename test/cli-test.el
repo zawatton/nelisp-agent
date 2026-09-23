@@ -310,7 +310,7 @@
        "interactive loop formats each structured worker response"
        (and (member "done" outputs)
             (member "Model: remote/b" outputs)
-            (member "NeLisp Agent stopped." outputs))))))
+            (member "Kaji stopped." outputs))))))
 
 (princ (format "NL-AGENT-CLI %s (%d failures)\n"
                (if (= nl-agent-cli-test--fail 0)

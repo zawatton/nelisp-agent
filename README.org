@@ -1,4 +1,11 @@
-#+TITLE: NeLisp Agent
+#+TITLE: Kaji (鍛冶)
+
+Kaji was previously called NeLisp Agent.  The name is Japanese for a
+blacksmith: the agent that works at the anvil, whose MCP tools it uses.
+Internal Lisp symbols keep the =nl-agent-= prefix and environment variables
+keep the =NELISP_AGENT_= prefix.  =bin/nelisp-agent= remains the core
+command line; =bin/kaji= is the OpenRouter + anvil launcher
+(=bin/nelisp-agent-openrouter= is kept as a compatibility name).
 
 * Purpose
 
@@ -333,7 +340,7 @@ A model invokes a published tool with non-evaluated Lisp data:
 
 *** Replacing a Hermes Agent setup
 
-=bin/nelisp-agent-openrouter= is a drop-in launcher for the OpenRouter
+=bin/kaji= is a drop-in launcher for the OpenRouter
 provider and the anvil MCP toolsets.  It reads =OPENROUTER_API_KEY= from the
 environment, or from =NELISP_AGENT_ENV_FILE= when that file is readable; the
 default file is =~/.hermes/.env=.  It uses =NELISP_AGENT_REMOTE_MODELS= for the
@@ -346,7 +353,7 @@ read-only shell commands; redirections, command substitution, paths outside the
 workspace, and write-capable options are denied; edit and elisp stay denied.
 
 #+begin_src sh
-bin/nelisp-agent-openrouter --workspace ../nelisp --unattended --task "..."
+bin/kaji --workspace ../nelisp --unattended --task "..."
 #+end_src
 
 * Service API

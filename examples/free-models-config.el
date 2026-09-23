@@ -82,7 +82,7 @@ When API-KEY-ENVIRONMENT is non-nil, its value is resolved for every request."
     (nl-agent-config-open
      (list :default-model (nl-agent-example-remote-default-model)
            :fallback-models (nl-agent-example-remote-fallback-models)
-           :system "You are NeLisp Agent."
+           :system "You are Kaji, a coding agent."
            :providers (list provider)))))
 
 (provide 'nl-agent-example-free-models)
