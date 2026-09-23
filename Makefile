@@ -88,10 +88,16 @@ LISP += examples/evaluate-bulk-policy.el
 	test-semantic-eval \
 	test-supervised-resume test-semantic-ir test-semantic-render test-bulk-policy test-bulk-policy-eval compile check
 
-.PHONY: test-bulk-reader
+.PHONY: test-bulk-reader test-bulk-calibration calibrate-bulk-policy
 
 test-bulk-reader:
 	@$(MAKE) test-emacs EMACS_TESTS='bulk-reader-test.el bulk-eval-test.el local-tools-test.el'
+
+test-bulk-calibration:
+	@sh test/bulk-policy-calibration-test.sh
+
+calibrate-bulk-policy:
+	@sh tools/calibrate-bulk-policy.sh "$(or $(BASELINE),HEAD)"
 
 test-bulk-policy:
 	@$(MAKE) test-emacs EMACS_TESTS='bulk-policy-test.el'
