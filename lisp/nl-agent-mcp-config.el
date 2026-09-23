@@ -72,7 +72,8 @@
   (nl-agent-mcp-config--keys
    spec
    '(:id :command :directory :environment :risk :timeoutSec
-     :protocolVersion :maxFrameBytes)
+     :protocolVersion :maxFrameBytes :era :legacyProtocolVersion
+     :probeTimeoutSec)
    "MCP server")
   (let ((id (plist-get spec :id))
         (command (plist-get spec :command)))
@@ -95,12 +96,19 @@
       (dolist (mapping
                '((:timeoutSec . :timeout-sec)
                  (:protocolVersion . :protocol-version)
-                 (:maxFrameBytes . :max-frame-bytes)))
+                 (:maxFrameBytes . :max-frame-bytes)
+                 (:legacyProtocolVersion . :legacy-protocol-version)
+                 (:probeTimeoutSec . :probe-timeout-sec)))
         (when (plist-member spec (car mapping))
           (setq args
                 (append args
                         (list (cdr mapping)
                               (plist-get spec (car mapping)))))))
+      (when (plist-member spec :era)
+        (let ((era (plist-get spec :era)))
+          (setq args
+                (append args
+                        (list :era (if (stringp era) (intern era) era))))))
       (let ((client
              (apply #'nl-agent-mcp-stdio-client-new
                     id (append command nil) args)))

@@ -118,8 +118,8 @@ authority.
 - The modern MCP stdio client implements the stateless 2026-07-28 protocol,
   including per-request metadata, paginated =tools/list=, =tools/call=, bounded
   frames/schemas, subprocess timeout, restricted environment inheritance, and
-  argument-free audit records.  Initialize-era MCP revisions are not yet
-  supported.
+  argument-free audit records.  Initialize-era servers are reached through a
+  =server/discover= probe and legacy handshake fallback.
 - The standard host tools provide workspace-confined exact edits, approved
   shell commands, and isolated batch-process Elisp.  Obvious destructive shell
   operations and dangerous Elisp primitives are blocked before execution.
@@ -316,6 +316,12 @@ JSON file.  MCP subprocesses otherwise receive only a small allowlist of basic
 path, locale, temporary-directory, and Windows process variables.  Relative
 directories resolve from the configuration file.  Optional limits are
 =timeoutSec= and =maxFrameBytes=.
+
+Servers from both MCP eras are supported.  The =era= key defaults to =auto=,
+which probes with =server/discover= and falls back to the =initialize=
+handshake for initialize-era servers (2025-11-25 and earlier).  Set =era= to
+=modern= or =legacy= to skip the probe.  The =legacyProtocolVersion= key
+(default 2025-11-25) and =probeTimeoutSec= key tune the fallback.
 
 A model invokes a published tool with non-evaluated Lisp data:
 

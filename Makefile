@@ -24,7 +24,7 @@ EMACS_TESTS = $(SHARED_TESTS) startup-test.el supervisor-test.el local-tools-tes
 	supervised-file-experiment-test.el supervised-file-diagnostic-test.el \
 	initialized-file-diagnostic-test.el file-teacher-forcing-test.el \
 	file-choice-loss-test.el \
-	mcp-stdio-test.el mcp-config-test.el \
+	mcp-stdio-test.el mcp-legacy-test.el mcp-config-test.el \
 	host-cleanup-test.el \
 	native-artifact-service-test.el improvement-test.el improvement-config-test.el \
 	service-tools-test.el \
