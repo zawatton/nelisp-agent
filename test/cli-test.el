@@ -204,6 +204,17 @@
      '("--task" "one" "--chat" "two")))))
 
 (nl-agent-cli-test--ck
+ "argument parser accepts read-only shell in unattended mode"
+ (equal
+  (nl-agent-cli-parse-args '("--unattended" "--read-only-shell"))
+  '(:unattended t :read-only-shell t)))
+
+(nl-agent-cli-test--ck
+ "argument parser rejects read-only shell without unattended mode"
+ (nl-agent-cli-test--error-p
+  (lambda () (nl-agent-cli-parse-args '("--read-only-shell")))))
+
+(nl-agent-cli-test--ck
  "argument parser rejects unknown options"
  (nl-agent-cli-test--error-p
   (lambda () (nl-agent-cli-parse-args '("--unsafe-magic")))))

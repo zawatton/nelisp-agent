@@ -26,5 +26,6 @@ export NELISP_AGENT_BASE_URL="${NELISP_AGENT_BASE_URL:-https://openrouter.ai/api
 export NELISP_AGENT_API_KEY_ENV="${NELISP_AGENT_API_KEY_ENV:-OPENROUTER_API_KEY}"
 export NELISP_AGENT_REMOTE_MODELS="${NELISP_AGENT_REMOTE_MODELS:-qwen/qwen3.8-27b:free}"
 export NELISP_AGENT_MCP_CONFIG="${NELISP_AGENT_MCP_CONFIG:-"$here/../examples/anvil-mcp-config.json"}"
+export NELISP_AGENT_READ_ONLY_SHELL="${NELISP_AGENT_READ_ONLY_SHELL:-1}"
 
 exec "$here/nelisp-agent" "$@"

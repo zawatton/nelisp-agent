@@ -49,6 +49,7 @@ EMACS_TESTS += bulk-policy-test.el
 EMACS_TESTS += bulk-eval-test.el
 EMACS_TESTS += bulk-policy-eval-test.el
 EMACS_TESTS += remote-models-config-test.el
+EMACS_TESTS += read-only-shell-test.el
 NELISP_TESTS = $(SHARED_TESTS)
 LISP = lisp/nl-agent-wire.el lisp/nl-agent-startup.el \
 	lisp/nl-agent-service.el lisp/nl-agent-stdio.el lisp/nl-agent-config.el \

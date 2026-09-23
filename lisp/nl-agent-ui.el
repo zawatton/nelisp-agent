@@ -40,7 +40,7 @@ Protocol and mode flags are supplied by the UI and cannot be overridden here."
   "Maximum retained transcript size when no approval block is active.")
 
 (defconst nl-agent-ui--forbidden-arguments
-  '("--task" "--chat" "--help" "--version" "--unattended"
+  '("--task" "--chat" "--help" "--version" "--unattended" "--read-only-shell"
     "--jsonl" "--jsonl-approval" "--workspace" "--"))
 
 (defun nl-agent-ui--argument-forbidden-p (argument)
@@ -49,8 +49,8 @@ Protocol and mode flags are supplied by the UI and cannot be overridden here."
       (cl-some (lambda (prefix)
                  (string-prefix-p (concat prefix "=") argument))
                  '("--task" "--chat" "--help" "--version"
-                 "--unattended" "--jsonl" "--jsonl-approval"
-                 "--workspace"))))
+                 "--unattended" "--read-only-shell" "--jsonl"
+                 "--jsonl-approval" "--workspace"))))
 
 (defun nl-agent-ui--validate-argv (argv where)
   "Validate string ARGV for WHERE and return a detached copy."
