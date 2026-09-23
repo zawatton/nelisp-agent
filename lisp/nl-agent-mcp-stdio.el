@@ -561,7 +561,9 @@ does not list this client's version is an error, never a legacy fallback."
   "Create a modern MCP stdio client ID for subprocess COMMAND.
 
 KEYS accepts :DIRECTORY, :ENVIRONMENT, :TIMEOUT-SEC, :PROTOCOL-VERSION,
-:ERA, :LEGACY-PROTOCOL-VERSION, :PROBE-TIMEOUT-SEC, and :MAX-FRAME-BYTES.
+:ERA, :LEGACY-PROTOCOL-VERSION, :PROBE-TIMEOUT-SEC, :MAX-FRAME-BYTES,
+and :INCLUDE-TOOLS, a list of remote tool names; when non-nil, only
+those tools are listed.
 The child inherits only a small safe environment plus explicit NAME=VALUE
 entries.  The default modern revision is 2026-07-28.
 
@@ -573,7 +575,7 @@ revision requested in that handshake (default 2025-11-25).
   (nl-agent-mcp-stdio--keys
    keys '(:directory :environment :timeout-sec :protocol-version
           :era :legacy-protocol-version :probe-timeout-sec
-          :max-frame-bytes))
+          :max-frame-bytes :include-tools))
   (unless (and (consp command) (cl-every #'stringp command))
     (error "nl-agent-mcp-stdio-client-new: COMMAND must be a string list"))
   (let ((directory (or (plist-get keys :directory) default-directory))
@@ -587,7 +589,15 @@ revision requested in that handshake (default 2025-11-25).
          (or (plist-get keys :legacy-protocol-version)
              (car nl-agent-mcp-stdio-legacy-protocol-versions)))
         (probe-timeout nil)
-        (maximum (or (plist-get keys :max-frame-bytes) (* 2 1024 1024))))
+        (maximum (or (plist-get keys :max-frame-bytes) (* 2 1024 1024)))
+        (include-tools (plist-get keys :include-tools)))
+    (unless (or (null include-tools)
+                (and (listp include-tools)
+                     (cl-every (lambda (name)
+                                 (and (stringp name)
+                                      (not (string-empty-p name))))
+                               include-tools)))
+      (error "nl-agent-mcp-stdio-client-new: include-tools must be a list of names"))
     (setq probe-timeout (or (plist-get keys :probe-timeout-sec) timeout))
     (unless (and (stringp directory) (file-directory-p directory))
       (error "nl-agent-mcp-stdio-client-new: directory must exist"))
@@ -625,7 +635,14 @@ revision requested in that handshake (default 2025-11-25).
             :next-id 0 :history nil :last-error nil)))
       (nl-agent-mcp-client-new
        id
-       (lambda () (nl-agent-mcp-stdio--list-tools transport))
+       (lambda ()
+         (let ((tools (nl-agent-mcp-stdio--list-tools transport)))
+           (if include-tools
+               (cl-remove-if-not
+                (lambda (descriptor)
+                  (member (plist-get descriptor :name) include-tools))
+                tools)
+             tools)))
        (lambda (name arguments context)
          (nl-agent-mcp-stdio--call-tool
           transport name arguments context))

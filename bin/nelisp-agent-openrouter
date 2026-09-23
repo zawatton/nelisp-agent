@@ -1,0 +1,30 @@
+#!/bin/sh
+# OpenRouter launcher for NeLisp Agent setup mirror: OpenRouter models plus anvil MCP tools.
+#
+# This mirrors ~/.hermes/config.yaml with the OpenRouter provider and the
+# terminal, file, and anvil toolsets.  The local launcher supplies the provider
+# environment and the checked-in anvil MCP configuration before delegating.
+set -eu
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+if [ -z "${OPENROUTER_API_KEY+x}" ] || [ -z "$OPENROUTER_API_KEY" ]; then
+    file=${NELISP_AGENT_ENV_FILE:-"$HOME/.hermes/.env"}
+    if [ -r "$file" ]; then
+        OPENROUTER_API_KEY=$(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}OPENROUTER_API_KEY=//p' "$file" | tail -n 1)
+        OPENROUTER_API_KEY=$(printf '%s' "$OPENROUTER_API_KEY" | sed "s/^'\(.*\)'$/\1/; s/^\"\(.*\)\"$/\1/")
+        export OPENROUTER_API_KEY
+    fi
+fi
+
+if [ -z "${OPENROUTER_API_KEY+x}" ] || [ -z "$OPENROUTER_API_KEY" ]; then
+    printf '%s\n' 'nelisp-agent-openrouter: OPENROUTER_API_KEY is not set' >&2
+    exit 78
+fi
+
+export NELISP_AGENT_BASE_URL="${NELISP_AGENT_BASE_URL:-https://openrouter.ai/api/v1}"
+export NELISP_AGENT_API_KEY_ENV="${NELISP_AGENT_API_KEY_ENV:-OPENROUTER_API_KEY}"
+export NELISP_AGENT_REMOTE_MODELS="${NELISP_AGENT_REMOTE_MODELS:-qwen/qwen3.8-27b:free}"
+export NELISP_AGENT_MCP_CONFIG="${NELISP_AGENT_MCP_CONFIG:-"$here/../examples/anvil-mcp-config.json"}"
+
+exec "$here/nelisp-agent" "$@"

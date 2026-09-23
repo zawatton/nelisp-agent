@@ -331,6 +331,20 @@ A model invokes a published tool with non-evaluated Lisp data:
 ```
 #+end_example
 
+*** Replacing a Hermes Agent setup
+
+=bin/nelisp-agent-openrouter= is a drop-in launcher for the OpenRouter
+provider and the anvil MCP toolsets.  It reads =OPENROUTER_API_KEY= from the
+environment, or from =NELISP_AGENT_ENV_FILE= when that file is readable; the
+default file is =~/.hermes/.env=.  It uses =NELISP_AGENT_REMOTE_MODELS= for the
+remote model list, defaulting to =qwen/qwen3.8-27b:free=, and publishes the
+same anvil tools Hermes allowlists through
+=examples/anvil-mcp-config.json=.
+
+#+begin_src sh
+bin/nelisp-agent-openrouter --workspace ../nelisp --unattended --task "..."
+#+end_src
+
 * Service API
 
 #+begin_src elisp

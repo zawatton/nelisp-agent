@@ -73,7 +73,7 @@
    spec
    '(:id :command :directory :environment :risk :timeoutSec
      :protocolVersion :maxFrameBytes :era :legacyProtocolVersion
-     :probeTimeoutSec)
+     :probeTimeoutSec :tools)
    "MCP server")
   (let ((id (plist-get spec :id))
         (command (plist-get spec :command)))
@@ -82,6 +82,11 @@
     (unless (and (vectorp command) (> (length command) 0)
                  (cl-every #'stringp (append command nil)))
       (error "MCP server %s command must be a non-empty string array" id))
+    (let ((tools (plist-get spec :tools)))
+      (when (plist-member spec :tools)
+        (unless (and (vectorp tools) (> (length tools) 0)
+                     (cl-every #'stringp (append tools nil)))
+          (error "MCP server %s tools must be a non-empty string array" id))))
     (let* ((risk
             (nl-agent-mcp-config--risk (plist-get spec :risk) id))
            (server-directory
@@ -104,6 +109,11 @@
                 (append args
                         (list (cdr mapping)
                               (plist-get spec (car mapping)))))))
+      (when (plist-member spec :tools)
+        (setq args
+              (append args
+                      (list :include-tools
+                            (append (plist-get spec :tools) nil)))))
       (when (plist-member spec :era)
         (let ((era (plist-get spec :era)))
           (setq args

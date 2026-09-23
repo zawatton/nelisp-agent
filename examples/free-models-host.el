@@ -15,6 +15,9 @@
 (defvar nl-agent-example-free-models)
 (defvar nl-agent-example-default-model)
 (defvar nl-agent-example-fallback-models)
+(declare-function nl-agent-example-remote-models "free-models-config" ())
+(declare-function nl-agent-example-remote-default-model "free-models-config" ())
+(declare-function nl-agent-example-remote-fallback-models "free-models-config" ())
 (load (expand-file-name "examples/free-models-config.el"
                         nl-agent-example-host-root))
 (require 'nl-agent-host)
@@ -91,7 +94,7 @@ is host-selected and defaults to legacy `trajectory-finetune'; selecting
                      (list :id "remote"
                            :type 'openai
                            :base-url base-url
-                           :models nl-agent-example-free-models)))
+                           :models (nl-agent-example-remote-models))))
                 (when api-key-environment
                   (setq provider
                         (append provider
@@ -105,7 +108,8 @@ is host-selected and defaults to legacy `trajectory-finetune'; selecting
                    (registry (nl-agent-host-router-registry router))
                    (available (nl-llm-agent-provider-models registry))
                    (selected
-                    (or initial-model nl-agent-example-default-model))
+                    (or initial-model
+                        (nl-agent-example-remote-default-model)))
                    (resolved
                     (condition-case resolve-error
                         (nl-llm-agent-provider-resolve registry selected)
@@ -119,7 +123,7 @@ is host-selected and defaults to legacy `trajectory-finetune'; selecting
                    (startup-fallbacks
                     (if (and remote
                              (equal (plist-get resolved :provider) "remote"))
-                        nl-agent-example-fallback-models
+                        (nl-agent-example-remote-fallback-models)
                       nil))
                    (workspace
                     (or workspace-root nl-agent-example-host-root))

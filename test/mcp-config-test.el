@@ -30,6 +30,15 @@
         (setenv "NL_AGENT_MCP_CONFIG_SECRET" "resolved-secret")
         (setenv "NL_AGENT_MCP_UNRELATED" "must-not-cross")
         (write-region
+         "{\"servers\":[{\"id\":\"tools\",\"command\":[\"server\",\"--stdio\"],\"tools\":[\"echo\"]}]}"
+         nil config nil 'silent)
+        (setq entries (nl-agent-mcp-config-load config))
+        (nl-agent-mcp-config-test--ck
+         "JSON config accepts a tool include list without starting a process"
+         (= (length entries) 1))
+        (nl-agent-mcp-config-close entries)
+        (setq entries nil)
+        (write-region
          "{\"servers\":[{\"id\":\"notes\",\"command\":[\"server\",\"--stdio\"],\"directory\":\"subdir\",\"environment\":{\"TOKEN\":\"NL_AGENT_MCP_CONFIG_SECRET\"},\"risk\":\"read\",\"timeoutSec\":4}]}"
          nil config nil 'silent)
         (make-directory (expand-file-name "subdir" directory))
@@ -100,6 +109,20 @@
          nil bad nil 'silent)
         (nl-agent-mcp-config-test--ck
          "unknown server keys are rejected before process start"
+         (nl-agent-mcp-config-test--error-p
+          (lambda () (nl-agent-mcp-config-load bad))))
+        (write-region
+         "{\"servers\":[{\"id\":\"x\",\"command\":[\"server\"],\"tools\":[]}]}"
+         nil bad nil 'silent)
+        (nl-agent-mcp-config-test--ck
+         "empty configured MCP tool include list is rejected before process start"
+         (nl-agent-mcp-config-test--error-p
+          (lambda () (nl-agent-mcp-config-load bad))))
+        (write-region
+         "{\"servers\":[{\"id\":\"x\",\"command\":[\"server\"],\"tools\":[1]}]}"
+         nil bad nil 'silent)
+        (nl-agent-mcp-config-test--ck
+         "non-string configured MCP tool include list is rejected before process start"
          (nl-agent-mcp-config-test--error-p
           (lambda () (nl-agent-mcp-config-load bad))))
         (write-region "[]" nil bad nil 'silent)
