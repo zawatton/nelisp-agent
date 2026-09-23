@@ -1,8 +1,8 @@
 ;;; ui-test.el --- Emacs JSONL client UI tests -*- lexical-binding: t; -*-
 
-(add-to-list 'load-path (expand-file-name "../lisp"
-                                         (file-name-directory
-                                          (or load-file-name buffer-file-name))))
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 
 (require 'cl-lib)
 (require 'ert)

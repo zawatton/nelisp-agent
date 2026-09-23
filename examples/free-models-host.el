@@ -8,10 +8,9 @@
       (file-name-as-directory (expand-file-name "."))))
   "NeLisp Agent project root resolved from this file.")
 
-(add-to-list 'load-path (expand-file-name "lisp" nl-agent-example-host-root))
-(add-to-list 'load-path
-             (expand-file-name "../nelisp-llm/lisp"
-                               nl-agent-example-host-root))
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (defvar nl-agent-example-free-models)
 (defvar nl-agent-example-default-model)
 (defvar nl-agent-example-fallback-models)

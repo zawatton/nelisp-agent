@@ -10,6 +10,9 @@
 
 ;;; Code:
 
+(load (expand-file-name "../lisp/nl-agent-stack-paths.el"
+                        (file-name-directory (or load-file-name buffer-file-name
+                                                 default-directory))) nil t)
 (require 'cl-lib)
 (require 'json)
 (require 'subr-x)
@@ -23,11 +26,6 @@
       (expand-file-name ".")))
   "Project root resolved relative to this example source.")
 
-(add-to-list 'load-path (expand-file-name "lisp" nl-agent-example-bulk-eval-root))
-(add-to-list 'load-path (expand-file-name "../nelisp-llm/lisp"
-                                          nl-agent-example-bulk-eval-root))
-(add-to-list 'load-path (expand-file-name "../nelisp-photon/lisp"
-                                          nl-agent-example-bulk-eval-root))
 
 (require 'nl-agent-host)
 (require 'nl-agent-bulk-reader)
