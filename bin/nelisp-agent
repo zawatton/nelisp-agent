@@ -5,7 +5,11 @@ agent_bin_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 agent_project_root=$(dirname -- "$agent_bin_dir")
 agent_emacs=${NELISP_AGENT_EMACS:-emacs}
 
+# Prefer newer sources: a stale .elc in a sibling checkout (measured
+# 2026-09-23: nelisp-llm's pre-fix nl-llm-agent-openai.elc) otherwise
+# silently shadows a fix that is already in the .el file.
 exec "$agent_emacs" -Q --batch \
+  --eval '(setq load-prefer-newer t)' \
   -L "$agent_project_root/lisp" \
   -L "$agent_project_root/../nelisp-llm/lisp" \
   -L "$agent_project_root/../nelisp-photon/lisp" \
